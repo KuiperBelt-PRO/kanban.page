@@ -10,14 +10,14 @@ const ops = require('./ops.js');
 const fmt = require('./format.js');
 const boards = require('./boards.js');
 const { Relay, RelayError, OFFICIAL, checkOrigin } = require('./relay.js');
+const kuiper = require('./kuiper/dispatch.js');
 
 const clone = x => JSON.parse(JSON.stringify(x));
 
 /* ── args ────────────────────────────────────────────── */
 
 const FLAGS = new Set(['--flag', '--no-flag', '--no-project', '--all', '--json', '--dry-run',
-  '--secret-stdin', '--store-plaintext', '--force', '--md']);
-
+  '--secret-stdin', '--store-plaintext', '--force', '--md', '--help']);
 function parseArgs(argv) {
   const out = { _: [], opts: {} };
   for (let i = 0; i < argv.length; i++) {
@@ -253,6 +253,15 @@ async function main() {
   const [cmd, ...args] = argv;
 
   if (!cmd || cmd === 'help' || opts.help) { console.log(USAGE); return 0; }
+
+  if (kuiper.isKuiperCommand(cmd)) {
+    return kuiper.dispatch(cmd, args, opts);
+  }
+  if (kuiper.isLocalMode() && kuiper.UPSTREAM_CMDS.has(cmd)) {
+    console.error(kuiper.localModeMessage(cmd));
+    return fmt.EXIT.usage;
+  }
+
   if (!CMDS[cmd]) { console.error(`unknown command "${cmd}"\n\n${USAGE}`); return fmt.EXIT.usage; }
 
   const res = await CMDS[cmd](args, opts);

@@ -5,9 +5,12 @@
   "bin": { "kanban": "cli/kanban.js" },
   "main": "core.js",
   "engines": { "node": ">=20" },
-  "files": ["cli/", "core.js", "docs/cli.md", "docs/agents.md", "README.md", "LICENSE"],
+  "dependencies": {
+    "better-sqlite3": "^11.9.1"
+  },
+  "files": ["cli/", "core.js", "server/", "migrations/", "docs/cli.md", "docs/agents.md", "README.md", "LICENSE"],
   "scripts": {
-    "test": "node --test tests/core.test.js tests/cli.test.js"
+    "test": "node --test tests/core.test.js tests/cli.test.js tests/db.test.js tests/kuiper-cli.test.js tests/api.test.js"
   },
   "repository": { "type": "git", "url": "git+https://github.com/brainforwarding/kanban.page.git" },
   "homepage": "https://kanban.page",

@@ -1,4 +1,5 @@
 .DS_Store
+node_modules/
 site/_og/og-1200.*
 site/_og/og-prev.png
 site/_og/og-raw.png

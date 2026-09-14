@@ -39,6 +39,8 @@ const tr = (key, vars) => I.t(locale, key, vars);
 
 // ?ns=… gives a board its own storage. Tests use it; so can a scratch board.
 const NS = new URLSearchParams(location.search).get('ns');
+const KUIPER = new URLSearchParams(location.search).has('kuiper');
+const KUIPER_BOARD = new URLSearchParams(location.search).get('board') || 'hub-delivery';
 const KEY = NS ? `board.v2.${NS}` : 'board.v2';
 const LEGACY_KEY = NS ? null : 'board.v1';
 
@@ -89,6 +91,7 @@ function firstRun() {
 }
 
 function load() {
+  if (KUIPER) return C.defaultBoard(locale);
   let raw = null;
   try {
     raw = JSON.parse(localStorage.getItem(KEY) || (LEGACY_KEY && localStorage.getItem(LEGACY_KEY)) || 'null');
@@ -96,6 +99,38 @@ function load() {
     console.warn('board: could not read storage —', err);
   }
   return raw ? C.migrate(raw) : firstRun();
+}
+
+async function loadKuiperBoard() {
+  if (!KUIPER || typeof KuiperStore === 'undefined') return;
+  const data = await KuiperStore.loadBoard(KUIPER_BOARD);
+  state = C.migrate(data);
+  lastStamped = clone(state);
+}
+
+async function kuiperSyncToServer() {
+  if (!KUIPER || typeof KuiperStore === 'undefined') return;
+  const prevTasks = new Map((lastStamped.tasks || []).map(t => [t.id, t]));
+  for (const t of state.tasks || []) {
+    const prev = prevTasks.get(t.id);
+    if (!prev) continue;
+    const patch = {};
+    if (prev.columnId !== t.columnId) patch.stage_id = t.columnId;
+    if (prev.order !== t.order) patch.position = t.order;
+    if (prev.title !== t.title) patch.title = t.title;
+    if ((prev.notes || '') !== (t.notes || '')) patch.notes = t.notes || '';
+    if (prev.flag !== t.flag) patch.flagged = !!t.flag;
+    if (Object.keys(patch).length) await KuiperStore.patchCard(t.id, patch);
+  }
+  lastStamped = clone(state);
+}
+
+function refreshKuiperBoard() {
+  if (!KUIPER) return;
+  loadKuiperBoard().then(() => render()).catch(err => {
+    console.warn('kuiper refresh failed —', err);
+    toast(locale === 'es' ? 'No se pudo refrescar el tablero' : 'Could not refresh board', null, 5000);
+  });
 }
 
 function applyLocale() {
@@ -166,6 +201,7 @@ let saveTimer = null;
 let lastStamped = clone(state);
 
 function writeStateNow() {
+  if (KUIPER) return true;
   try {
     localStorage.setItem(KEY, JSON.stringify(state));
     return true;
@@ -206,6 +242,10 @@ function linkedReplacement(remote) {
 function flushSave() {
   clearTimeout(saveTimer);
   C.stampChanges(lastStamped, state);
+  if (KUIPER) {
+    kuiperSyncToServer().catch(err => console.warn('kuiper save failed —', err));
+    return;
+  }
   lastStamped = clone(state);
   writeStateNow();
   if (sync) schedulePush();
@@ -3407,7 +3447,24 @@ window.__board = {
   get bindingGen() { return bindingGenOf(state); },
 };
 
-render();
+if (KUIPER) {
+  const syncBtn = document.querySelector('[data-act="sync"]');
+  if (syncBtn) syncBtn.hidden = true;
+  const refreshBtn = document.createElement('button');
+  refreshBtn.className = 'icon';
+  refreshBtn.id = 'kuiperRefresh';
+  refreshBtn.title = locale === 'es' ? 'Refrescar tablero' : 'Refresh board';
+  refreshBtn.textContent = '↻';
+  refreshBtn.onclick = () => refreshKuiperBoard();
+  const tools = document.querySelector('.tools');
+  if (tools) tools.insertBefore(refreshBtn, tools.firstChild);
+  loadKuiperBoard().then(() => render()).catch(err => {
+    console.warn('kuiper load failed —', err);
+    render();
+  });
+} else {
+  render();
+}
 
 /* Sync starts last, once there is a board on screen. A `#sync=` link is
    removed from the address bar immediately, then opens the checking state;
@@ -3442,8 +3499,8 @@ function adoptFromHash() {
 // change, not a load — no reload, so the boot path below never sees it.
 window.addEventListener('hashchange', adoptFromHash);
 
-adoptFromHash();
-if (sync) {
+if (!KUIPER) adoptFromHash();
+if (!KUIPER && sync) {
   connectWatch();
   pull();
 }

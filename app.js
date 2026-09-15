@@ -1851,6 +1851,7 @@ function beginDrag(card, sx, sy) {
 
   card.style.height = r.height + 'px';
   card.classList.add('dragging-src');
+  card.style.pointerEvents = 'none';
   document.body.style.cursor = 'grabbing';
   document.body.style.userSelect = 'none';
 
@@ -1883,17 +1884,40 @@ function moveDrag(ev) {
   retarget(ev.clientX, ev.clientY);
 }
 
-function retarget(x, y) {
-  const cols = $$('.col:not(.ghost-col)', board);
-  let target = null;
-  for (const c of cols) {
-    const r = c.getBoundingClientRect();
-    if (x >= r.left - 7 && x <= r.right + 7) { target = c; break; }
+function dropTargetAt(x, y) {
+  if (!drag) return null;
+  for (const el of document.elementsFromPoint(x, y)) {
+    if (el === drag.card || drag.wrap.contains(el)) continue;
+    const body = el.closest('.col-body');
+    if (!body || !board.contains(body)) continue;
+    const col = body.closest('.col:not(.ghost-col)');
+    if (col) return { body, col };
   }
-  if (!target) target = drag.card.closest('.col');
-  if (!target) return;
+  const pad = 7;
+  for (const c of $$('.col:not(.ghost-col)', board)) {
+    const r = c.getBoundingClientRect();
+    if (x >= r.left - pad && x <= r.right + pad && y >= r.top - pad && y <= r.bottom + pad) {
+      return { body: $('.col-body', c), col: c };
+    }
+  }
+  const col = drag.card.closest('.col:not(.ghost-col)');
+  return col ? { body: $('.col-body', col), col } : null;
+}
 
-  const body = $('.col-body', target);
+function syncTaskFromDrop(task, colEl) {
+  if (!task || !colEl) return;
+  const lane = colEl.dataset.lane;
+  if (!lane || !KUIPER || typeof KuiperUI === 'undefined' || !KuiperUI.isSwimlaneMode?.()) return;
+  const mode = state.groupBy;
+  if (mode === 'project') task.projectId = lane === '__none__' ? null : lane;
+  else if (mode === 'epic') task.epicId = lane === '__none__' ? null : lane;
+  else if (mode === 'priority') task.priority = Number(lane) || 0;
+}
+
+function retarget(x, y) {
+  const hit = dropTargetAt(x, y);
+  if (!hit?.body) return;
+  const { body } = hit;
   $$('.col-body', board).forEach(b => b.classList.toggle('over', b === body));
 
   const cards = $$('.card', body).filter(c => c !== drag.card);
@@ -1962,6 +1986,9 @@ function endDrag() {
 
   drag.card.classList.remove('dragging-src');
   drag.card.style.height = '';
+  drag.card.style.pointerEvents = '';
+  const droppedCol = drag.card.closest('.col:not(.ghost-col)');
+  syncTaskFromDrop(byId(movedId), droppedCol);
   $$('.col-body', board).forEach(b => b.classList.remove('over'));
   board.classList.remove('dragging');
   document.body.style.cursor = '';

@@ -87,8 +87,30 @@ const STATIC_FILES = new Set([
   'manifest.webmanifest', 'sw.js', 'qr.js',
 ]);
 
+/** En serve local, reemplaza el SW de PWA para vaciar caché y desregistrarse. */
+const KUIPER_LOCAL_SW = `'use strict';
+self.addEventListener('install', (e) => self.skipWaiting());
+self.addEventListener('activate', (e) => {
+  e.waitUntil(
+    caches.keys()
+      .then((keys) => Promise.all(keys.map((k) => caches.delete(k))))
+      .then(() => self.registration.unregister())
+      .then(() => self.clients.matchAll({ type: 'window' }))
+      .then((clients) => Promise.all(clients.map((c) => c.navigate(c.url))))
+  );
+});
+`;
+
 function serveStatic(req, res, urlPath) {
-  const safe = urlPath === '/' ? 'index.html' : urlPath.replace(/^\//, '');
+  const safe = urlPath === '/' ? 'index.html' : urlPath.replace(/^\//, '').split('?')[0];
+  if (safe === 'sw.js') {
+    res.writeHead(200, {
+      'Content-Type': 'text/javascript; charset=utf-8',
+      'Cache-Control': 'no-store',
+    });
+    res.end(KUIPER_LOCAL_SW);
+    return true;
+  }
   if (!STATIC_FILES.has(safe) && !safe.startsWith('assets/')) return false;
   const filePath = path.join(STATIC_ROOT, safe);
   if (!filePath.startsWith(STATIC_ROOT)) return false;
@@ -104,7 +126,10 @@ function serveStatic(req, res, urlPath) {
       '.webmanifest': 'application/manifest+json',
       '.svg': 'image/svg+xml',
     };
-    res.writeHead(200, { 'Content-Type': types[ext] || 'application/octet-stream' });
+    res.writeHead(200, {
+      'Content-Type': types[ext] || 'application/octet-stream',
+      'Cache-Control': 'no-cache',
+    });
     res.end(data);
     return true;
   } catch (err) {

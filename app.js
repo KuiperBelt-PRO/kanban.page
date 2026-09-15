@@ -41,6 +41,30 @@ const tr = (key, vars) => I.t(locale, key, vars);
 const NS = new URLSearchParams(location.search).get('ns');
 const KUIPER = new URLSearchParams(location.search).has('kuiper');
 const KUIPER_BOARD = new URLSearchParams(location.search).get('board') || 'hub-delivery';
+const KUIPER_PREFS_KEY = 'board.kuiper.prefs';
+
+function loadKuiperPrefs() {
+  try { return JSON.parse(localStorage.getItem(KUIPER_PREFS_KEY) || '{}'); }
+  catch (err) { return {}; }
+}
+
+function saveKuiperPrefs(prefs) {
+  if (!KUIPER) return;
+  try { localStorage.setItem(KUIPER_PREFS_KEY, JSON.stringify(prefs)); }
+  catch (err) { /* session-only */ }
+}
+
+function mergeKuiperDevicePrefs() {
+  if (!KUIPER) return;
+  const prefs = loadKuiperPrefs();
+  const urlTheme = new URLSearchParams(location.search).get('theme');
+  if (urlTheme === 'dark' || urlTheme === 'light') state.theme = urlTheme;
+  else if (prefs.theme === 'dark' || prefs.theme === 'light') state.theme = prefs.theme;
+  else state.theme = 'dark';
+  if (prefs.density === 'compact' || prefs.density === 'comfortable') state.density = prefs.density;
+  document.documentElement.dataset.theme = state.theme;
+  document.documentElement.dataset.density = state.density;
+}
 const KEY = NS ? `board.v2.${NS}` : 'board.v2';
 const LEGACY_KEY = NS ? null : 'board.v1';
 
@@ -105,6 +129,7 @@ async function loadKuiperBoard() {
   if (!KUIPER || typeof KuiperStore === 'undefined') return;
   const data = await KuiperStore.loadBoard(KUIPER_BOARD);
   state = C.migrate(data);
+  mergeKuiperDevicePrefs();
   lastStamped = clone(state);
 }
 
@@ -1137,7 +1162,7 @@ updateBtn.onclick = () => {
   }, 1800);
 };
 
-installPwa();
+if (!KUIPER) installPwa();
 
 $('#newTask').innerHTML = ICON.plus;
 $('#menuBtn').innerHTML = ICON.more;
@@ -1227,8 +1252,11 @@ const tasksIn = colId => state.tasks
   .sort((a, b) => a.order - b.order);
 
 function render() {
-  document.documentElement.dataset.theme = state.theme;
-  document.documentElement.dataset.density = state.density;
+  if (KUIPER) mergeKuiperDevicePrefs();
+  else {
+    document.documentElement.dataset.theme = state.theme;
+    document.documentElement.dataset.density = state.density;
+  }
   renderFilters();
   flip(renderBoard);
 }
@@ -2870,6 +2898,7 @@ $('#menuBtn').addEventListener('click', () => {
 function toggleTheme() {
   state.theme = state.theme === 'dark' ? 'light' : 'dark';
   document.documentElement.dataset.theme = state.theme;
+  if (KUIPER) saveKuiperPrefs({ ...loadKuiperPrefs(), theme: state.theme });
   save();
 }
 
@@ -2878,6 +2907,7 @@ function toggleDensity() {
   // flip() so every card glides to its new rect instead of the board snapping
   flip(() => { document.documentElement.dataset.density = state.density; });
   $('#act-density').setAttribute('aria-pressed', String(state.density === 'compact'));
+  if (KUIPER) saveKuiperPrefs({ ...loadKuiperPrefs(), density: state.density });
   save();
 }
 
@@ -3448,6 +3478,7 @@ window.__board = {
 };
 
 if (KUIPER) {
+  mergeKuiperDevicePrefs();
   const syncBtn = document.querySelector('[data-act="sync"]');
   if (syncBtn) syncBtn.hidden = true;
   const refreshBtn = document.createElement('button');

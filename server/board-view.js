@@ -39,7 +39,7 @@ function snapshotToState(snapshot) {
     projectsMt: now,
     tasks,
     events: [],
-    theme: 'light',
+    theme: 'dark',
     density: 'comfortable',
     _kuiper: {
       boardId: snapshot.board.id,

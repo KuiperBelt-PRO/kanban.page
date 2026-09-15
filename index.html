@@ -18,6 +18,43 @@
 <meta name="twitter:description" content="A private, local kanban board that works offline.">
 <meta name="twitter:image" content="https://kanban.page/og.png">
 <link rel="manifest" href="manifest.webmanifest">
+<script>
+(function () {
+  var p = new URLSearchParams(location.search);
+  if (!p.has('kuiper')) return;
+  var theme = p.get('theme');
+  if (theme !== 'dark' && theme !== 'light') {
+    try {
+      var prefs = JSON.parse(localStorage.getItem('board.kuiper.prefs') || '{}');
+      if (prefs.theme === 'dark' || prefs.theme === 'light') theme = prefs.theme;
+    } catch (e) { /* ignore */ }
+  }
+  if (theme !== 'dark' && theme !== 'light') theme = 'dark';
+  document.documentElement.dataset.theme = theme;
+  var meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.content = theme === 'dark' ? '#131218' : '#F1F0F5';
+  // Modo local: el SW de kanban.page cachea app.js antiguo y rompe tema/UI.
+  if ('serviceWorker' in navigator && !p.has('_kuipernosw')) {
+    navigator.serviceWorker.getRegistrations().then(function (regs) {
+      if (!regs.length) return;
+      Promise.all(regs.map(function (r) { return r.unregister(); }))
+        .then(function () {
+          if (!window.caches) return;
+          return caches.keys().then(function (keys) {
+            return Promise.all(keys.filter(function (k) {
+              return k.indexOf('board-shell-') === 0;
+            }).map(function (k) { return caches.delete(k); }));
+          });
+        })
+        .then(function () {
+          var u = new URL(location.href);
+          u.searchParams.set('_kuipernosw', '1');
+          location.replace(u.toString());
+        });
+    });
+  }
+})();
+</script>
 <link rel="stylesheet" href="styles.css">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%2314131A'/><rect x='9' y='7' width='6' height='18' rx='1.5' fill='%23FFB454'/><rect x='18' y='7' width='6' height='11' rx='1.5' fill='%235B5768'/></svg>">
 </head>
@@ -235,9 +272,9 @@
 
 <input type="file" id="importFile" accept="application/json,.json" hidden>
 
-<script src="i18n.js"></script>
-<script src="core.js"></script>
-<script src="kuiper-store.js"></script>
-<script src="app.js"></script>
+<script src="i18n.js?v=kuiper"></script>
+<script src="core.js?v=kuiper"></script>
+<script src="kuiper-store.js?v=kuiper"></script>
+<script src="app.js?v=kuiper"></script>
 </body>
 </html>

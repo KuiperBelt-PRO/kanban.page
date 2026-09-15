@@ -1208,12 +1208,28 @@ function flip(mutate) {
   // renderBoard rebuilds the DOM, which would otherwise scroll every column
   // back to the top on any render — including every keystroke in search.
   const scrolled = new Map();
-  $$('.col-body', board).forEach(b => scrolled.set(b.parentElement.dataset.id, b.scrollTop));
+  const swimlaneBoard = board.classList.contains('kuiper-swimlanes');
+  const boardScroll = swimlaneBoard ? { left: board.scrollLeft, top: board.scrollTop } : null;
+  $$('.col-body', board).forEach(b => {
+    const col = b.closest('.col');
+    const key = KUIPER && typeof KuiperUI !== 'undefined' && KuiperUI.isSwimlaneMode?.()
+      ? KuiperUI.colScrollKey(col)
+      : col?.dataset.id;
+    if (key) scrolled.set(key, b.scrollTop);
+  });
 
   mutate();
 
+  if (boardScroll && board.classList.contains('kuiper-swimlanes')) {
+    board.scrollLeft = boardScroll.left;
+    board.scrollTop = boardScroll.top;
+  }
   $$('.col-body', board).forEach(b => {
-    const top = scrolled.get(b.parentElement.dataset.id);
+    const col = b.closest('.col');
+    const key = KUIPER && typeof KuiperUI !== 'undefined' && KuiperUI.isSwimlaneMode?.()
+      ? KuiperUI.colScrollKey(col)
+      : col?.dataset.id;
+    const top = key ? scrolled.get(key) : 0;
     if (top) b.scrollTop = top;
   });
 
@@ -1363,81 +1379,119 @@ function renderFilters(opts = {}) {
   if (KUIPER && typeof KuiperUI !== 'undefined') KuiperUI.mountRailControls(filtersEl);
 }
 
-function renderBoard() {
-  board.innerHTML = '';
-
-  state.columns.forEach(col => {
-    const items = tasksIn(col.id);
-    const total = state.tasks.filter(t => t.columnId === col.id && onBoard(t)).length;
-
-    const el = document.createElement('section');
-    el.className = 'col';
-    el.dataset.id = col.id;
-    const colLabel = KUIPER && typeof KuiperUI !== 'undefined' ? KuiperUI.stageLabel(col.name) : col.name;
-    el.innerHTML = `
-      <div class="col-head">
-        <span class="col-name"${KUIPER ? '' : ' contenteditable="plaintext-only"'} spellcheck="false">${esc(colLabel)}</span>
-        <span class="col-count">${items.length}</span>
-        <span class="grow"></span>
-        <button class="grab" title="${tr('reorder')}">${ICON.grip}</button>
-        <button class="icon sm" data-add title="${tr('newTask')}">${ICON.plus}</button>
-        ${total === 0 && state.columns.length > 1 ? `<button class="icon sm" data-del title="${tr('delete')} ${tr('task')}">${ICON.close}</button>` : ''}
-      </div>
-      <div class="col-body"></div>`;
-
-    // Two ways in, one code path: the handle, and any bare part of the head.
-    // People try to drag a column by its header before they look for a grip.
-    $('.col-head', el).onpointerdown = ev => {
-      if (ev.target.closest('.col-name') || ev.target.closest('button:not(.grab)')) return;
-      dragColumn(ev, el);
-    };
-
-    const body = $('.col-body', el);
-    if (composerCol === col.id) body.append(composerEl(col.id));
-    if (KUIPER && typeof KuiperUI !== 'undefined') KuiperUI.appendGrouped(body, items, cardEl);
-    else items.forEach(t => body.append(cardEl(t)));
-
-    // An empty board is one blinking cursor where the first card's title goes.
-    // A cursor means type, and needs no caption.
-    if (col === state.columns[0] && composerCol === null && boardIsEmpty()) {
-      const ph = document.createElement('button');
-      ph.className = 'phantom';
-      ph.title = 'New task';
-      ph.innerHTML = '<span class="tcursor"></span>';
-      ph.onclick = () => openComposer(col.id);
-      body.append(ph);
-    }
-
-    $('[data-add]', el).onclick = () => openComposer(col.id);
-    const del = $('[data-del]', el);
-    if (del) del.onclick = () => deleteColumn(col.id);
-
-    const name = $('.col-name', el);
-    if (!KUIPER) {
-      name.addEventListener('blur', () => {
-        const v = name.textContent.trim();
-        col.name = v || col.name;
-        name.textContent = col.name;
-        save();
-        flushExternal();
-      });
-      name.addEventListener('keydown', e => {
-        if (e.key === 'Enter') { e.preventDefault(); name.blur(); }
-        if (e.key === 'Escape') { name.textContent = col.name; name.blur(); }
-      });
-    }
-
-    board.append(el);
-  });
-
-  // Adding a stage is a once-a-year action, so it gets no standing chrome:
-  // a hairline affordance that only appears when the pointer is on the board,
-  // plus "Add stage" in the ⋯ menu, which is its real home.
+function appendGhostCol(parent) {
   const ghost = document.createElement('div');
   ghost.className = 'col ghost-col';
   ghost.innerHTML = `<button class="add-col" title="Add stage">${ICON.plus}</button>`;
   $('.add-col', ghost).onclick = addColumn;
-  board.append(ghost);
+  parent.append(ghost);
+}
+
+function appendColumn(parent, col, items, { lane = null, showPhantom = false } = {}) {
+  const total = state.tasks.filter(t => t.columnId === col.id && onBoard(t)).length;
+
+  const el = document.createElement('section');
+  el.className = 'col';
+  el.dataset.id = col.id;
+  if (lane) el.dataset.lane = lane;
+
+  const colLabel = KUIPER && typeof KuiperUI !== 'undefined' ? KuiperUI.stageLabel(col.name) : col.name;
+  el.innerHTML = `
+    <div class="col-head">
+      <span class="col-name"${KUIPER ? '' : ' contenteditable="plaintext-only"'} spellcheck="false">${esc(colLabel)}</span>
+      <span class="col-count">${items.length}</span>
+      <span class="grow"></span>
+      <button class="grab" title="${tr('reorder')}">${ICON.grip}</button>
+      <button class="icon sm" data-add title="${tr('newTask')}">${ICON.plus}</button>
+      ${total === 0 && state.columns.length > 1 ? `<button class="icon sm" data-del title="${tr('delete')} ${tr('task')}">${ICON.close}</button>` : ''}
+    </div>
+    <div class="col-body"></div>`;
+
+  $('.col-head', el).onpointerdown = ev => {
+    if (ev.target.closest('.col-name') || ev.target.closest('button:not(.grab)')) return;
+    dragColumn(ev, el);
+  };
+
+  const body = $('.col-body', el);
+  if (composerCol === col.id && !lane) body.append(composerEl(col.id));
+  if (KUIPER && typeof KuiperUI !== 'undefined' && !KuiperUI.isSwimlaneMode?.()) {
+    KuiperUI.appendGrouped(body, items, cardEl);
+  } else {
+    items.forEach(t => body.append(cardEl(t)));
+  }
+
+  if (showPhantom && composerCol === null && boardIsEmpty()) {
+    const ph = document.createElement('button');
+    ph.className = 'phantom';
+    ph.title = 'New task';
+    ph.innerHTML = '<span class="tcursor"></span>';
+    ph.onclick = () => openComposer(col.id);
+    body.append(ph);
+  }
+
+  $('[data-add]', el).onclick = () => openComposer(col.id);
+  const del = $('[data-del]', el);
+  if (del) del.onclick = () => deleteColumn(col.id);
+
+  const name = $('.col-name', el);
+  if (!KUIPER) {
+    name.addEventListener('blur', () => {
+      const v = name.textContent.trim();
+      col.name = v || col.name;
+      name.textContent = col.name;
+      save();
+      flushExternal();
+    });
+    name.addEventListener('keydown', e => {
+      if (e.key === 'Enter') { e.preventDefault(); name.blur(); }
+      if (e.key === 'Escape') { name.textContent = col.name; name.blur(); }
+    });
+  }
+
+  parent.append(el);
+  return el;
+}
+
+function renderBoard() {
+  board.innerHTML = '';
+  const swimlanes = KUIPER && typeof KuiperUI !== 'undefined' && KuiperUI.isSwimlaneMode?.();
+  board.classList.toggle('kuiper-swimlanes', !!swimlanes);
+  if (swimlanes) board.style.setProperty('--stage-count', String(state.columns.length));
+  else board.style.removeProperty('--stage-count');
+
+  if (swimlanes) {
+    const visibleTasks = state.tasks.filter(t => onBoard(t) && visible(t));
+    const lanes = KuiperUI.orderedSwimlanes(visibleTasks);
+    const track = document.createElement('div');
+    track.className = 'kuiper-swimlanes-track';
+    lanes.forEach((lane, laneIdx) => {
+      const laneEl = document.createElement('div');
+      laneEl.className = 'kuiper-swimlane';
+      laneEl.dataset.lane = lane.key;
+      laneEl.append(KuiperUI.buildSwimlaneSeparator(lane));
+
+      const row = document.createElement('div');
+      row.className = 'kuiper-swimlane-row';
+      state.columns.forEach((col, colIdx) => {
+        const items = tasksIn(col.id).filter(t => KuiperUI.taskInLane(t, lane.key));
+        appendColumn(row, col, items, {
+          lane: lane.key,
+          showPhantom: laneIdx === 0 && colIdx === 0,
+        });
+      });
+      if (laneIdx === lanes.length - 1) appendGhostCol(row);
+      laneEl.append(row);
+      track.append(laneEl);
+    });
+    board.append(track);
+    if (!lanes.length) appendGhostCol(board);
+    return;
+  }
+
+  state.columns.forEach((col, colIdx) => {
+    appendColumn(board, col, tasksIn(col.id), { showPhantom: colIdx === 0 });
+  });
+  appendGhostCol(board);
 }
 
 function cardEl(t) {
@@ -1881,6 +1935,10 @@ function dragFrame(now) {
   const br = board.getBoundingClientRect();
   if (x - br.left < zone) { board.scrollLeft -= speed * (1 - (x - br.left) / zone); scrolled = true; }
   else if (br.right - x < zone) { board.scrollLeft += speed * (1 - (br.right - x) / zone); scrolled = true; }
+  if (board.classList.contains('kuiper-swimlanes')) {
+    if (y - br.top < zone) { board.scrollTop -= speed * (1 - (y - br.top) / zone); scrolled = true; }
+    else if (br.bottom - y < zone) { board.scrollTop += speed * (1 - (br.bottom - y) / zone); scrolled = true; }
+  }
 
   // the content moved under a still pointer, so the drop index is now stale
   if (scrolled) retarget(x, y);
@@ -1946,9 +2004,21 @@ function endDrag() {
 }
 
 function commitOrder(movedId) {
-  $$('.col:not(.ghost-col)', board).forEach(col => {
-    C.applyOrder(state.tasks, col.dataset.id, $$('.card', col).map(c => c.dataset.id));
-  });
+  const swimlanes = KUIPER && typeof KuiperUI !== 'undefined' && KuiperUI.isSwimlaneMode?.();
+  if (swimlanes) {
+    state.columns.forEach(col => {
+      const ids = [];
+      $$('.kuiper-swimlane').forEach(laneEl => {
+        const colEl = laneEl.querySelector(`.col[data-id="${col.id}"]`);
+        if (colEl) ids.push(...$$('.card', colEl).map(c => c.dataset.id));
+      });
+      C.applyOrder(state.tasks, col.id, ids);
+    });
+  } else {
+    $$('.col:not(.ghost-col)', board).forEach(col => {
+      C.applyOrder(state.tasks, col.dataset.id, $$('.card', col).map(c => c.dataset.id));
+    });
+  }
   const t = byId(movedId);
   if (t) t.updatedAt = Date.now();
 }

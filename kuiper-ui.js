@@ -1060,6 +1060,79 @@ const KuiperUI = (() => {
     }
   }
 
+  function isSwimlaneMode() {
+    const st = ctx.state?.();
+    return !!(st && st.groupBy && st.groupBy !== 'none');
+  }
+
+  function groupMeta(key) {
+    const st = ctx.state?.();
+    const mode = st?.groupBy || 'none';
+    if (mode === 'project') {
+      if (key === '__none__') return { key, label: tr('none'), color: null, kind: 'none' };
+      const p = (st.projects || []).find(x => x.id === key);
+      return { key, label: p?.name || tr('none'), color: p?.color || null, kind: 'project' };
+    }
+    if (mode === 'epic') {
+      if (key === '__none__') return { key, label: tr('noEpic'), color: null, kind: 'none' };
+      const epic = epicOf(key);
+      return { key, label: epic?.title || tr('noEpic'), color: epicColor(epic), kind: 'epic' };
+    }
+    if (mode === 'priority') {
+      const n = Number(key);
+      return { key, label: priorityLabel(n), color: null, kind: 'priority', priority: n };
+    }
+    return { key, label: groupLabel(key), color: null, kind: 'none' };
+  }
+
+  function orderedSwimlanes(tasks) {
+    if (!isSwimlaneMode()) return [];
+    const st = ctx.state?.();
+    const mode = st.groupBy;
+    const keys = new Set(tasks.map(t => groupKeyFor(t)));
+    let ordered = [];
+    if (mode === 'project') {
+      for (const p of st.projects || []) if (keys.has(p.id)) ordered.push(p.id);
+      if (keys.has('__none__')) ordered.push('__none__');
+    } else if (mode === 'epic') {
+      for (const e of st.epics || []) if (keys.has(e.id)) ordered.push(e.id);
+      if (keys.has('__none__')) ordered.push('__none__');
+    } else if (mode === 'priority') {
+      ordered = ['4', '3', '2', '1', '0'].filter(k => keys.has(k));
+    }
+    return ordered.map(k => {
+      const meta = groupMeta(k);
+      return { ...meta, count: tasks.filter(t => groupKeyFor(t) === k).length };
+    });
+  }
+
+  function buildSwimlaneSeparator(lane) {
+    const sep = document.createElement('div');
+    sep.className = 'kuiper-swimlane-sep';
+    if (lane.color) sep.style.setProperty('--c', lane.color);
+    let mark = '';
+    if (lane.kind === 'project' && lane.color) {
+      mark = '<span class="kuiper-sep-mark project" aria-hidden="true"><span class="dot"></span></span>';
+    } else if (lane.kind === 'epic') {
+      mark = '<span class="kuiper-sep-mark epic" aria-hidden="true"><span class="tri"></span></span>';
+    } else if (lane.kind === 'priority' && lane.priority > 0) {
+      mark = `<span class="kuiper-sep-mark pri">${priorityMarkHtml(lane.priority)}</span>`;
+    }
+    const count = lane.count > 0 ? `<span class="kuiper-sep-count">${lane.count}</span>` : '';
+    sep.innerHTML = `${mark}<span class="kuiper-sep-label">${esc(lane.label)}</span>${count}`;
+    return sep;
+  }
+
+  function taskInLane(task, laneKey) {
+    return groupKeyFor(task) === laneKey;
+  }
+
+  function colScrollKey(colEl) {
+    if (!colEl) return '';
+    const lane = colEl.dataset.lane;
+    return lane ? `${lane}:${colEl.dataset.id}` : colEl.dataset.id;
+  }
+
   function buildCardMeta(t, project, since) {
     const epic = t.epicId ? epicOf(t.epicId) : null;
     if (!project && !epic && !since) return '';
@@ -1567,6 +1640,11 @@ const KuiperUI = (() => {
     sortTasks,
     groupedTasks,
     appendGrouped,
+    isSwimlaneMode,
+    orderedSwimlanes,
+    buildSwimlaneSeparator,
+    taskInLane,
+    colScrollKey,
     decorateCardMeta,
     buildCardMeta,
     cardIdRowHtml,

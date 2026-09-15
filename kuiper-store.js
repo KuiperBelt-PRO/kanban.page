@@ -18,6 +18,10 @@ const KuiperStore = (() => {
     return request(`/api/v1/boards/${encodeURIComponent(slug || boardSlug())}/state`);
   }
 
+  async function loadNavigation() {
+    return request('/api/v1/navigation');
+  }
+
   async function patchCard(id, body) {
     return request(`/api/v1/cards/${encodeURIComponent(id)}`, {
       method: 'PATCH',
@@ -32,7 +36,7 @@ const KuiperStore = (() => {
     });
   }
 
-  return { boardSlug, loadBoard, patchCard, createCard };
+  return { boardSlug, loadBoard, loadNavigation, patchCard, createCard };
 })();
 
 if (typeof module !== 'undefined') module.exports = { KuiperStore };

@@ -33,7 +33,7 @@ describe('db migrate', () => {
     const db = openDb();
     const first = migrate(db);
     const second = migrate(db);
-    assert.equal(first.version, 1);
+    assert.equal(first.version, 3);
     assert.equal(second.applied, 0);
   });
 
@@ -41,7 +41,7 @@ describe('db migrate', () => {
     const db = openDb();
     migrate(db);
     const org = orgs.create(db, { slug: 'acme', name: 'Acme' });
-    const project = projects.create(db, { organization_id: org.id, slug: 'p1', name: 'P1' });
+    const project = projects.create(db, { organization_id: org.id, slug: 'p1', name: 'P1', code: 'P1' });
     const { board } = boards.create(db, { organization_id: org.id, slug: 'b1', name: 'B1', project_ids: [project.id] });
     boards.addProject(db, { board_id: board.id, project_id: project.id });
     const card = cards.create(db, { board_id: board.id, project_id: project.id, title: 'T1', stage: 'INBOX' });

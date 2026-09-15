@@ -62,6 +62,7 @@ function mergeKuiperDevicePrefs() {
   else if (prefs.theme === 'dark' || prefs.theme === 'light') state.theme = prefs.theme;
   else state.theme = 'dark';
   if (prefs.density === 'compact' || prefs.density === 'comfortable') state.density = prefs.density;
+  if (prefs.locale === 'es' || prefs.locale === 'en') locale = prefs.locale;
   document.documentElement.dataset.theme = state.theme;
   document.documentElement.dataset.density = state.density;
 }
@@ -127,10 +128,16 @@ function load() {
 
 async function loadKuiperBoard() {
   if (!KUIPER || typeof KuiperStore === 'undefined') return;
+  const prefs = loadKuiperPrefs();
   const data = await KuiperStore.loadBoard(KUIPER_BOARD);
   state = C.migrate(data);
+  if (prefs.groupBy) state.groupBy = prefs.groupBy;
+  if (prefs.sortBy) state.sortBy = prefs.sortBy;
+  if (prefs.locale) { locale = I.valid(prefs.locale); applyLocale(); }
+  if (typeof KuiperUI !== 'undefined') KuiperUI.migratePrefsToState(state, prefs);
   mergeKuiperDevicePrefs();
   lastStamped = clone(state);
+  if (typeof KuiperUI !== 'undefined') KuiperUI.onBoardLoaded();
 }
 
 async function kuiperSyncToServer() {
@@ -145,9 +152,12 @@ async function kuiperSyncToServer() {
     if (prev.title !== t.title) patch.title = t.title;
     if ((prev.notes || '') !== (t.notes || '')) patch.notes = t.notes || '';
     if (prev.flag !== t.flag) patch.flagged = !!t.flag;
+    if (prev.projectId !== t.projectId) patch.project_id = t.projectId;
+    if (typeof KuiperUI !== 'undefined') Object.assign(patch, KuiperUI.patchFromTask(prev, t));
     if (Object.keys(patch).length) await KuiperStore.patchCard(t.id, patch);
   }
   lastStamped = clone(state);
+  if (typeof KuiperUI !== 'undefined') KuiperUI.saveUiPrefs();
 }
 
 function refreshKuiperBoard() {
@@ -205,7 +215,9 @@ function setLocale(next) {
   if (next === locale) return;
   locale = next;
   try { localStorage.setItem(LOCALE_KEY, locale); } catch (err) { /* session-only */ }
+  if (KUIPER) saveKuiperPrefs({ ...loadKuiperPrefs(), locale });
   applyLocale();
+  if (KUIPER && typeof KuiperUI !== 'undefined') KuiperUI.onLocale();
   render();
   if (!editor.hidden) openEditor(editing === 'new' ? null : editing);
   if (!panel.hidden) renderProjects();
@@ -1239,37 +1251,71 @@ const archivedTasks = () => state.tasks.filter(t => t.archivedAt);
 
 function visible(t) {
   if (state.filter && t.projectId !== state.filter) return false;
+  if (KUIPER && typeof KuiperUI !== 'undefined' && !KuiperUI.matchesVisible(t)) return false;
   if (state.flagFilter && !t.flag) return false;
   if (!query) return true;
   const p = projectOf(t);
-  return [t.title, t.notes, t.session, p && p.name]
+  return [t.title, t.notes, t.session, p && p.name, t.id]
     .filter(Boolean).join(' ').toLowerCase()
     .includes(query);
 }
 
-const tasksIn = colId => state.tasks
-  .filter(t => t.columnId === colId && onBoard(t) && visible(t))
-  .sort((a, b) => a.order - b.order);
+const tasksIn = colId => {
+  let list = state.tasks.filter(t => t.columnId === colId && onBoard(t) && visible(t));
+  if (KUIPER && typeof KuiperUI !== 'undefined') list = KuiperUI.sortTasks(list);
+  else list.sort((a, b) => a.order - b.order);
+  return list;
+};
 
-function render() {
+function render(opts = {}) {
   if (KUIPER) mergeKuiperDevicePrefs();
   else {
     document.documentElement.dataset.theme = state.theme;
     document.documentElement.dataset.density = state.density;
   }
-  renderFilters();
+  renderFilters(opts);
+  flip(renderBoard);
+}
+
+function renderBoardOnly() {
   flip(renderBoard);
 }
 
 const boardIsEmpty = () => !state.tasks.some(onBoard);
 
-function renderFilters() {
+function renderFilters(opts = {}) {
+  if (KUIPER && typeof KuiperUI !== 'undefined') {
+    if (!opts.keepFiltersOpen) {
+      filtersEl.innerHTML = '';
+      const flagged = state.tasks.filter(t => t.flag && onBoard(t)).length;
+      const showFlagpill = flagged > 0 || !!state.flagFilter;
+      if (showFlagpill) {
+        const fp = document.createElement('button');
+        fp.className = 'pill flagpill' + (hadFlagpill ? '' : ' enter');
+        fp.title = tr('flagged');
+        fp.setAttribute('aria-pressed', String(!!state.flagFilter));
+        fp.innerHTML = `${ICON.starFill}<span style="color:var(--faint);font:400 10.5px var(--mono)">${flagged}</span>`;
+        fp.onclick = () => { state.flagFilter = !state.flagFilter; save(); render(); };
+        filtersEl.append(fp);
+      }
+      hadFlagpill = showFlagpill;
+      KuiperUI.mountRailControls(filtersEl, opts);
+    } else {
+      KuiperUI.renderRailControls(opts);
+    }
+    return;
+  }
+
   filtersEl.innerHTML = '';
+
   const all = document.createElement('button');
   all.className = 'pill';
   all.setAttribute('aria-pressed', String(!state.filter && !state.flagFilter));
   all.textContent = tr('all'); // no dot: the dot means "a project", and All is not one
-  all.onclick = () => { state.filter = null; state.flagFilter = false; save(); render(); };
+  all.onclick = () => {
+    state.filter = null; state.flagFilter = false;
+    save(); render();
+  };
   filtersEl.append(all);
 
   // The ★ chip is pinned beside All so a long project list can never scroll
@@ -1299,7 +1345,11 @@ function renderFilters() {
     b.style.setProperty('--c', p.color);
     b.setAttribute('aria-pressed', String(state.filter === p.id));
     b.innerHTML = `<span class="dot"></span>${esc(p.name)}${n ? ` <span style="color:var(--faint);font:400 10.5px var(--mono)">${n}</span>` : ''}`;
-    b.onclick = () => { state.filter = state.filter === p.id ? null : p.id; state.flagFilter = false; save(); render(); };
+    b.onclick = () => {
+      state.filter = state.filter === p.id ? null : p.id; state.flagFilter = false;
+      if (KUIPER && typeof KuiperUI !== 'undefined') KuiperUI.saveUiPrefs();
+      save(); render();
+    };
     filtersEl.append(b);
   });
 
@@ -1309,6 +1359,8 @@ function renderFilters() {
   add.innerHTML = ICON.plus;
   add.onclick = openProjects;
   filtersEl.append(add);
+
+  if (KUIPER && typeof KuiperUI !== 'undefined') KuiperUI.mountRailControls(filtersEl);
 }
 
 function renderBoard() {
@@ -1321,9 +1373,10 @@ function renderBoard() {
     const el = document.createElement('section');
     el.className = 'col';
     el.dataset.id = col.id;
+    const colLabel = KUIPER && typeof KuiperUI !== 'undefined' ? KuiperUI.stageLabel(col.name) : col.name;
     el.innerHTML = `
       <div class="col-head">
-        <span class="col-name" contenteditable="plaintext-only" spellcheck="false">${esc(col.name)}</span>
+        <span class="col-name"${KUIPER ? '' : ' contenteditable="plaintext-only"'} spellcheck="false">${esc(colLabel)}</span>
         <span class="col-count">${items.length}</span>
         <span class="grow"></span>
         <button class="grab" title="${tr('reorder')}">${ICON.grip}</button>
@@ -1341,7 +1394,8 @@ function renderBoard() {
 
     const body = $('.col-body', el);
     if (composerCol === col.id) body.append(composerEl(col.id));
-    items.forEach(t => body.append(cardEl(t)));
+    if (KUIPER && typeof KuiperUI !== 'undefined') KuiperUI.appendGrouped(body, items, cardEl);
+    else items.forEach(t => body.append(cardEl(t)));
 
     // An empty board is one blinking cursor where the first card's title goes.
     // A cursor means type, and needs no caption.
@@ -1359,17 +1413,19 @@ function renderBoard() {
     if (del) del.onclick = () => deleteColumn(col.id);
 
     const name = $('.col-name', el);
-    name.addEventListener('blur', () => {
-      const v = name.textContent.trim();
-      col.name = v || col.name;
-      name.textContent = col.name;
-      save();
-      flushExternal();
-    });
-    name.addEventListener('keydown', e => {
-      if (e.key === 'Enter') { e.preventDefault(); name.blur(); }
-      if (e.key === 'Escape') { name.textContent = col.name; name.blur(); }
-    });
+    if (!KUIPER) {
+      name.addEventListener('blur', () => {
+        const v = name.textContent.trim();
+        col.name = v || col.name;
+        name.textContent = col.name;
+        save();
+        flushExternal();
+      });
+      name.addEventListener('keydown', e => {
+        if (e.key === 'Enter') { e.preventDefault(); name.blur(); }
+        if (e.key === 'Escape') { name.textContent = col.name; name.blur(); }
+      });
+    }
 
     board.append(el);
   });
@@ -1391,19 +1447,32 @@ function cardEl(t) {
   el.dataset.id = t.id;
   el.tabIndex = 0;
   if (p) el.style.setProperty('--c', p.color);
+  if (KUIPER && typeof KuiperUI !== 'undefined') {
+    el.classList.add('kuiper-card');
+    if ((t.priority || 0) > 0) el.classList.add('has-pri');
+  }
 
   const since = age(t.updatedAt);
+  const kuiper = KUIPER && typeof KuiperUI !== 'undefined';
 
-  el.innerHTML = `
-    <span class="edge"></span>
-    <button class="flag" title="${t.flag ? 'Unflag' : 'Flag  F'}" aria-pressed="${t.flag ? 'true' : 'false'}">${t.flag ? ICON.starFill : ICON.star}</button>
-    <h3>${esc(t.title)}</h3>
-    ${t.notes ? `<p class="note">${esc(t.notes)}</p>` : ''}
-    ${p || since ? `<div class="meta">
+  let metaBlock = '';
+  if (kuiper) {
+    metaBlock = KuiperUI.buildCardMeta(t, p, since);
+  } else if (p || since) {
+    metaBlock = `<div class="meta">
         ${p ? `<span class="proj">${esc(p.name)}</span>` : ''}
         <span class="grow"></span>
         ${since ? `<span class="age" title="Untouched for ${since}">${since}</span>` : ''}
-      </div>` : ''}
+      </div>`;
+  }
+  el.innerHTML = `
+    <span class="edge"></span>
+    <button class="flag" title="${t.flag ? 'Unflag' : 'Flag  F'}" aria-pressed="${t.flag ? 'true' : 'false'}">${t.flag ? ICON.starFill : ICON.star}</button>
+    ${kuiper ? KuiperUI.cardPriorityBadge(t) : ''}
+    ${kuiper ? KuiperUI.cardIdRowHtml(t) : ''}
+    <h3>${esc(t.title)}</h3>
+    ${t.notes ? `<p class="note">${esc(t.notes)}</p>` : ''}
+    ${metaBlock}
     ${t.session ? `<button class="chip" title="Copy session command">
         <span class="caret">&#9656;</span>
         <span class="cmd">${esc(t.session)}</span>
@@ -1413,6 +1482,7 @@ function cardEl(t) {
   const chip = $('.chip', el);
   if (chip) chip.onclick = e => { e.stopPropagation(); copyChip(chip, t.session); };
   $('.flag', el).onclick = e => { e.stopPropagation(); toggleFlag(t.id); };
+  if (kuiper) KuiperUI.bindCardIdButtons(el);
 
   el.addEventListener('keydown', e => {
     if (e.target !== el) return; // buttons inside the card keep their own keys
@@ -1474,9 +1544,30 @@ function age(ts) {
 /* ── tasks ─────────────────────────────────────────────── */
 
 function addTask(patch) {
+  if (KUIPER && typeof KuiperStore !== 'undefined' && typeof KuiperUI !== 'undefined' && patch.title) {
+    try {
+      const body = KuiperUI.buildCreateBody({
+        title: patch.title,
+        notes: patch.notes || '',
+        session: patch.session || '',
+        columnId: patch.columnId || state.columns[0].id,
+        projectId: patch.projectId,
+        epicId: patch.epicId,
+        flag: patch.flag,
+        priority: patch.priority,
+      });
+      KuiperStore.createCard(body).then(() => refreshKuiperBoard())
+        .catch(err => console.warn('kuiper create failed —', err));
+    } catch (err) {
+      console.warn('kuiper create failed —', err);
+    }
+    return null;
+  }
   const now = Date.now();
   const t = {
-    id: uid(), title: '', notes: '', projectId: state.filter || null,
+    id: uid(), title: '', notes: '',
+    projectId: (KUIPER && state.projectFilters?.[0]) || state.filter || null,
+    epicId: null, priority: 0,
     session: '', flag: state.flagFilter || false, columnId: state.columns[0].id,
     order: 0, createdAt: now, updatedAt: now, ...patch,
   };
@@ -2032,6 +2123,8 @@ const fNotes = $('#f-notes');
 const fSession = $('#f-session');
 const fStage = $('#f-stage');
 const fProject = $('#f-project');
+const fEpic = $('#f-epic');
+const fPriority = $('#f-priority');
 const fFlag = $('#f-flag');
 
 let draft = null;
@@ -2041,7 +2134,11 @@ function openEditor(id, colId) {
   const t = id ? byId(id) : null;
   editing = t ? t.id : 'new';
   draft = t ? clone(t) : {
-    title: '', notes: '', projectId: state.filter || null, session: '',
+    title: '', notes: '',
+    projectId: (state.projectFilters && state.projectFilters[0]) || state.filter || null,
+    session: '',
+    epicId: (state.epicFilters && state.epicFilters[0]) || state.epicFilter || null,
+    priority: 0,
     flag: state.flagFilter || false, columnId: colId || state.columns[0].id,
   };
 
@@ -2051,7 +2148,11 @@ function openEditor(id, colId) {
   $('#f-archive').style.visibility = t ? 'visible' : 'hidden';
   $('#f-close').title = tr('discard');
   renderStage();
-  renderProjectChooser();
+  if (KUIPER && typeof KuiperUI !== 'undefined') {
+    KuiperUI.onEditorOpen(draft, editing);
+  } else {
+    renderProjectChooser();
+  }
   syncFlagBtn();
 
   scrim.hidden = false;
@@ -2064,7 +2165,7 @@ function renderStage() {
   fStage.innerHTML = '';
   state.columns.forEach(c => {
     const b = document.createElement('button');
-    b.textContent = c.name;
+    b.textContent = KUIPER && typeof KuiperUI !== 'undefined' ? KuiperUI.stageLabel(c.name) : c.name;
     b.setAttribute('aria-pressed', String(draft.columnId === c.id));
     b.onclick = () => { draft.columnId = c.id; renderStage(); };
     fStage.append(b);
@@ -2086,16 +2187,24 @@ function renderProjectChooser() {
     b.style.setProperty('--c', p.color);
     b.setAttribute('aria-pressed', String(draft.projectId === p.id));
     b.innerHTML = `<span class="dot"></span>${esc(p.name)}`;
-    b.onclick = () => { draft.projectId = p.id; renderProjectChooser(); };
+    b.onclick = () => {
+      draft.projectId = p.id;
+      renderProjectChooser();
+      if (KUIPER && typeof KuiperUI !== 'undefined') {
+        KuiperUI.renderEditorFields(draft, { epicEl: fEpic, priorityEl: fPriority });
+      }
+    };
     fProject.append(b);
   });
 
-  const add = document.createElement('button');
-  add.className = 'pill add';
-  add.title = 'Projects';
-  add.innerHTML = ICON.plus;
-  add.onclick = () => { closeEditor(); openProjects(); };
-  fProject.append(add);
+  if (!KUIPER) {
+    const add = document.createElement('button');
+    add.className = 'pill add';
+    add.title = 'Projects';
+    add.innerHTML = ICON.plus;
+    add.onclick = () => { closeEditor(); openProjects(); };
+    fProject.append(add);
+  }
 }
 
 function syncFlagBtn() {
@@ -2105,6 +2214,7 @@ function syncFlagBtn() {
 }
 
 function saveEditor() {
+  if (KUIPER && typeof KuiperUI !== 'undefined') KuiperUI.flushEditor();
   draft.title = fTitle.value.trim();
   draft.notes = fNotes.value.trim();
   draft.session = fSession.value.trim();
@@ -2132,6 +2242,7 @@ function saveEditor() {
 }
 
 function closeEditor() {
+  if (KUIPER && typeof KuiperUI !== 'undefined') KuiperUI.onEditorClose();
   editor.hidden = true;
   editing = null;
   draft = null;
@@ -2382,6 +2493,7 @@ function dragProjectRow(ev, srcRow) {
 
 $('#proj-add').addEventListener('submit', e => {
   e.preventDefault();
+  if (KUIPER) return;
   const input = $('#proj-name');
   const name = input.value.trim();
   if (!name) return;
@@ -3069,7 +3181,8 @@ function hideToast() {
 
 function syncScrim() {
   const was = scrim.hidden;
-  scrim.hidden = editor.hidden && panel.hidden && reportEl.hidden && archiveEl.hidden && syncEl.hidden;
+  const kuiperSideOpen = KUIPER && document.documentElement.dataset.kuiperSide === 'open';
+  scrim.hidden = !kuiperSideOpen && editor.hidden && panel.hidden && reportEl.hidden && archiveEl.hidden && syncEl.hidden;
   // A scrim that has just appeared has not been pressed yet. See below.
   if (was && !scrim.hidden) scrimPressed = false;
 }
@@ -3095,6 +3208,10 @@ scrim.onclick = () => {
   // keyboard, so the discard was one stray tap away. saveEditor() already
   // bails to closeEditor() on an empty title, so an accidental open costs
   // nothing. Esc and the ✕ remain the deliberate ways to throw work away.
+  if (KUIPER && typeof KuiperUI !== 'undefined' && document.documentElement.dataset.kuiperSide === 'open') {
+    KuiperUI.setSidebarOpen(false);
+    return;
+  }
   if (!editor.hidden) saveEditor(); else closeEditor();
   closeProjects(); closeReport(); closeArchive(); closeSync();
 };
@@ -3479,6 +3596,52 @@ window.__board = {
 
 if (KUIPER) {
   mergeKuiperDevicePrefs();
+  if (typeof KuiperUI !== 'undefined') {
+    KuiperUI.init({
+      state: () => state,
+      tr,
+      locale: () => locale,
+      save: () => save(),
+      render: () => render(),
+      renderBoard: () => renderBoardOnly(),
+      syncScrim,
+      saveKuiperPrefs,
+      loadKuiperPrefs,
+      byId: id => byId(id),
+      openEditor: id => openEditor(id),
+      isEditorOpen: id => !editor.hidden && editing === id,
+      copyText,
+      toast,
+      saveEditor: () => saveEditor(),
+      archiveEditorTask: () => {
+        if (typeof KuiperUI !== 'undefined') KuiperUI.flushEditor();
+        const id = editing;
+        const t = id && id !== 'new' ? byId(id) : null;
+        if (t && draft) {
+          Object.assign(t, {
+            title: fTitle.value.trim(),
+            notes: fNotes.value.trim(),
+            session: fSession.value.trim(),
+            projectId: draft.projectId,
+            epicId: draft.epicId,
+            priority: draft.priority || 0,
+            flag: draft.flag,
+            columnId: draft.columnId,
+          });
+        }
+        closeEditor();
+        if (!t) return;
+        archiveTasks([t]);
+        toast(tr('taskArchived'), undo);
+      },
+      deleteEditorTask: id => {
+        closeEditor();
+        deleteForever([id]);
+        save();
+        render();
+      },
+    });
+  }
   const syncBtn = document.querySelector('[data-act="sync"]');
   if (syncBtn) syncBtn.hidden = true;
   const refreshBtn = document.createElement('button');
@@ -3489,7 +3652,10 @@ if (KUIPER) {
   refreshBtn.onclick = () => refreshKuiperBoard();
   const tools = document.querySelector('.tools');
   if (tools) tools.insertBefore(refreshBtn, tools.firstChild);
-  loadKuiperBoard().then(() => render()).catch(err => {
+  loadKuiperBoard().then(() => {
+    render();
+    if (typeof KuiperUI !== 'undefined') KuiperUI.openCardFromUrl();
+  }).catch(err => {
     console.warn('kuiper load failed —', err);
     render();
   });

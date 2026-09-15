@@ -34,6 +34,7 @@ function run(sub, args, opts) {
           stage_id: opts.stageId,
           epic_id: opts.epic,
           flagged: opts.flag,
+          priority: opts.priority != null ? Number(opts.priority) : undefined,
         });
         if (opts.json) return printOk({ card }, { command: 'card create' });
         console.log(`created ${card.id}`);
@@ -56,6 +57,7 @@ function run(sub, args, opts) {
           project_id: opts.project,
           epic_id: opts.epic,
           flagged: opts.flag != null ? true : (opts.noFlag ? false : undefined),
+          priority: opts.priority != null ? Number(opts.priority) : undefined,
         });
         if (opts.json) return printOk({ card }, { command: 'card update' });
         console.log(`updated ${card.id}`);

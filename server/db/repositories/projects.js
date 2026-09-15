@@ -1,21 +1,43 @@
 'use strict';
 
-const { entityId } = require('../../ids.js');
+const { entityId, normalizeProjectCode } = require('../../ids.js');
+const { allocateProjectCode } = require('../backfill-003.js');
 const { nowIso, slugify } = require('../../util.js');
 const orgs = require('./organizations.js');
 
-function create(db, { organization_id, organization_slug, slug, name, description }) {
+function create(db, { organization_id, organization_slug, slug, name, description, code }) {
   let org = organization_id ? orgs.getById(db, organization_id) : null;
   if (!org && organization_slug) org = orgs.getBySlug(db, organization_slug);
   if (!org) throw new Error('organization not found');
   const id = entityId();
   const ts = nowIso();
   const finalSlug = slugify(slug || name);
+  const finalCode = code
+    ? normalizeProjectCode(code)
+    : allocateProjectCode(db, org.id, finalSlug, name);
   db.prepare(`
-    INSERT INTO projects(id, organization_id, slug, name, description, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(id, org.id, finalSlug, name, description || null, ts, ts);
+    INSERT INTO projects(id, organization_id, slug, name, description, code, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(id, org.id, finalSlug, name, description || null, finalCode, ts, ts);
   return getById(db, id);
+}
+
+function ensureCode(db, projectId, code) {
+  const project = getById(db, projectId);
+  if (!project) return null;
+  if (code) {
+    const finalCode = normalizeProjectCode(code);
+    if (project.code !== finalCode) {
+      db.prepare('UPDATE projects SET code = ?, updated_at = ? WHERE id = ?')
+        .run(finalCode, nowIso(), projectId);
+    }
+    return getById(db, projectId);
+  }
+  if (project.code) return project;
+  const finalCode = allocateProjectCode(db, project.organization_id, project.slug, project.name, project.id);
+  db.prepare('UPDATE projects SET code = ?, updated_at = ? WHERE id = ?')
+    .run(finalCode, nowIso(), projectId);
+  return getById(db, projectId);
 }
 
 function getById(db, id) {
@@ -54,5 +76,5 @@ function listRepos(db, projectId) {
 }
 
 module.exports = {
-  create, getById, getByOrgSlug, listByOrg, linkRepo, listRepos,
+  create, getById, getByOrgSlug, listByOrg, linkRepo, listRepos, ensureCode,
 };

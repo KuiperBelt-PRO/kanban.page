@@ -4,7 +4,8 @@ const path = require('path');
 const boards = require('../db/repositories/boards.js');
 const cards = require('../db/repositories/cards.js');
 const orgs = require('../db/repositories/organizations.js');
-const { snapshotToState } = require('../board-view.js');
+const { snapshotToState, attachOrganization } = require('../board-view.js');
+const { buildNavigation } = require('../navigation.js');
 const { sendJson, readBody, cors } = require('./middleware.js');
 
 function notFound(res) {
@@ -31,6 +32,10 @@ async function handleApi(req, res, db, urlPath, method) {
     return sendJson(res, 200, { ok: true, data: { organizations: orgs.list(db) } });
   }
 
+  if (urlPath === '/api/v1/navigation' && method === 'GET') {
+    return sendJson(res, 200, { ok: true, data: buildNavigation(db) });
+  }
+
   const boardMatch = urlPath.match(/^\/api\/v1\/boards\/([^/]+)$/);
   if (boardMatch && method === 'GET') {
     try {
@@ -44,7 +49,8 @@ async function handleApi(req, res, db, urlPath, method) {
   const boardStateMatch = urlPath.match(/^\/api\/v1\/boards\/([^/]+)\/state$/);
   if (boardStateMatch && method === 'GET') {
     try {
-      const snapshot = boards.getSnapshot(db, decodeURIComponent(boardStateMatch[1]));
+      const raw = boards.getSnapshot(db, decodeURIComponent(boardStateMatch[1]));
+      const snapshot = attachOrganization(raw, db);
       return sendJson(res, 200, { ok: true, data: snapshotToState(snapshot) });
     } catch (err) {
       return notFound(res);
@@ -83,7 +89,7 @@ async function handleApi(req, res, db, urlPath, method) {
 
 const STATIC_ROOT = path.join(__dirname, '..', '..');
 const STATIC_FILES = new Set([
-  'index.html', 'app.js', 'core.js', 'i18n.js', 'styles.css', 'kuiper-store.js',
+  'index.html', 'app.js', 'core.js', 'i18n.js', 'styles.css', 'kuiper-store.js', 'kuiper-ui.js',
   'manifest.webmanifest', 'sw.js', 'qr.js',
 ]);
 

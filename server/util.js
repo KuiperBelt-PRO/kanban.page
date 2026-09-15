@@ -35,6 +35,7 @@ function rowToCard(row) {
     session_ref: row.session_ref,
     flagged: intToBool(row.flagged),
     archived: intToBool(row.archived),
+    priority: row.priority != null ? row.priority : 0,
     created_at: row.created_at,
     updated_at: row.updated_at,
   };

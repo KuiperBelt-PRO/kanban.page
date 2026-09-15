@@ -1,6 +1,6 @@
 'use strict';
 
-const { generateCardId } = require('../../ids.js');
+const { nextCardIdentity } = require('../../ids.js');
 const { nowIso, boolToInt, rowToCard } = require('../../util.js');
 const boards = require('./boards.js');
 const projects = require('./projects.js');
@@ -54,6 +54,7 @@ function create(db, {
   stage,
   epic_id,
   flagged,
+  priority,
 }) {
   let board = board_id ? boards.getById(db, board_id) : null;
   if (!board && board_slug) board = boards.resolveBoard(db, board_slug);
@@ -72,14 +73,14 @@ function create(db, {
   }
 
   const stageRow = resolveStage(db, board.id, stage_id || stage);
-  const id = generateCardId(db);
+  const { id, issue_number } = nextCardIdentity(db, project.id);
   const ts = nowIso();
   const position = nextPosition(db, stageRow.id);
   db.prepare(`
     INSERT INTO cards(
       id, project_id, board_id, epic_id, stage_id, position, title, notes,
-      session_ref, flagged, archived, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+      session_ref, flagged, priority, issue_number, archived, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
   `).run(
     id,
     project.id,
@@ -91,6 +92,8 @@ function create(db, {
     notes || '',
     session_ref || null,
     boolToInt(flagged),
+    priority != null ? Number(priority) : 0,
+    issue_number,
     ts,
     ts,
   );
@@ -129,13 +132,14 @@ function update(db, id, fields) {
   const notes = fields.notes != null ? fields.notes : card.notes;
   const sessionRef = fields.session_ref != null ? fields.session_ref : card.session_ref;
   const flagged = fields.flagged != null ? boolToInt(fields.flagged) : boolToInt(card.flagged);
+  const priority = fields.priority != null ? Number(fields.priority) : card.priority;
   const ts = nowIso();
 
   db.prepare(`
     UPDATE cards SET project_id = ?, epic_id = ?, title = ?, notes = ?,
-      session_ref = ?, flagged = ?, updated_at = ?
+      session_ref = ?, flagged = ?, priority = ?, updated_at = ?
     WHERE id = ?
-  `).run(projectId, epicId, title, notes, sessionRef, flagged, ts, id);
+  `).run(projectId, epicId, title, notes, sessionRef, flagged, priority, ts, id);
 
   events.insert(db, {
     card_id: id,

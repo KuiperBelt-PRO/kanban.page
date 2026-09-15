@@ -1,6 +1,12 @@
 'use strict';
 
+const orgs = require('./db/repositories/organizations.js');
+
 /** Map Kuiper board snapshot → upstream kanban.page state shape. */
+
+const ENTITY_COLORS = [
+  '#FFB454', '#7FD1AE', '#8FB8FF', '#F58FA8', '#C79BFF', '#6FD3E8', '#D6C36B', '#9AA5B8',
+];
 
 function snapshotToState(snapshot) {
   const now = Date.now();
@@ -12,8 +18,20 @@ function snapshotToState(snapshot) {
   }));
   const projects = snapshot.projects.map((p, index) => ({
     id: p.id,
+    slug: p.slug,
     name: p.name,
-    color: ['#FFB454', '#7FD1AE', '#8FB8FF', '#F58FA8'][index % 4],
+    code: p.code || null,
+    organizationId: p.organization_id || snapshot.organization?.id || null,
+    organizationSlug: p.organization_slug || snapshot.organization?.slug || null,
+    color: ENTITY_COLORS[index % ENTITY_COLORS.length],
+    mt: now,
+  }));
+  const epics = (snapshot.epics || []).map((e, index) => ({
+    id: e.id,
+    projectId: e.project_id,
+    title: e.title,
+    status: e.status,
+    color: ENTITY_COLORS[index % ENTITY_COLORS.length],
     mt: now,
   }));
   const tasks = [];
@@ -24,6 +42,8 @@ function snapshotToState(snapshot) {
       title: card.title,
       notes: card.notes || '',
       projectId: card.project_id,
+      epicId: card.epic_id || null,
+      priority: card.priority != null ? card.priority : 0,
       session: card.session_ref || '',
       flag: !!card.flagged,
       columnId: card.stage_id,
@@ -32,21 +52,47 @@ function snapshotToState(snapshot) {
       updatedAt: Date.parse(card.updated_at) || now,
     });
   }
+  const org = snapshot.organization || null;
   return {
     columns,
     columnsMt: now,
     projects,
     projectsMt: now,
+    epics,
+    epicsMt: now,
     tasks,
     events: [],
     theme: 'dark',
     density: 'comfortable',
+    epicFilter: null,
+    projectFilters: [],
+    epicFilters: [],
+    groupBy: 'none',
+    sortBy: 'position',
     _kuiper: {
       boardId: snapshot.board.id,
       boardSlug: snapshot.board.slug,
+      boardName: snapshot.board.name,
       version: snapshot.version,
+      organization: org ? { id: org.id, slug: org.slug, name: org.name } : null,
     },
   };
 }
 
-module.exports = { snapshotToState };
+function attachOrganization(snapshot, db) {
+  const board = snapshot.board;
+  if (!board?.organization_id) return snapshot;
+  const org = orgs.getById(db, board.organization_id);
+  if (!org) return snapshot;
+  return {
+    ...snapshot,
+    organization: { id: org.id, slug: org.slug, name: org.name },
+    projects: snapshot.projects.map(p => ({
+      ...p,
+      organization_id: org.id,
+      organization_slug: org.slug,
+    })),
+  };
+}
+
+module.exports = { snapshotToState, attachOrganization };

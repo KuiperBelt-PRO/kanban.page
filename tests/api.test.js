@@ -59,4 +59,22 @@ describe('api', () => {
     assert.ok(res.body.data.board.slug === 'hub-delivery');
     assert.ok(res.body.data.cards.length >= 1);
   });
+
+  it('returns navigation tree', async () => {
+    const res = await get('/api/v1/navigation');
+    assert.equal(res.status, 200);
+    assert.ok(Array.isArray(res.body.data.organizations));
+    assert.ok(res.body.data.organizations.length >= 1);
+    const org = res.body.data.organizations[0];
+    assert.ok(Array.isArray(org.projects));
+    assert.ok(Array.isArray(org.boards));
+  });
+
+  it('board state includes epics and priority', async () => {
+    const res = await get('/api/v1/boards/hub-delivery/state');
+    assert.equal(res.status, 200);
+    assert.ok(Array.isArray(res.body.data.epics));
+    assert.ok(res.body.data.tasks.length >= 1);
+    assert.ok('priority' in res.body.data.tasks[0]);
+  });
 });

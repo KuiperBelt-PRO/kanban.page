@@ -1005,11 +1005,15 @@ const BoardCore = (() => {
         tasks,
         events: raw.events,
         projects: raw.projects || [],
+        epics: raw.epics || [],
         theme: raw.theme || 'light',
         density: raw.density === 'compact' ? 'compact' : 'comfortable',
         asOf: null,
         filter: raw.filter || null,
         flagFilter: !!raw.flagFilter,
+        epicFilter: raw.epicFilter || null,
+        groupBy: raw.groupBy || 'none',
+        sortBy: raw.sortBy || 'position',
       };
     }
 
@@ -1040,9 +1044,13 @@ const BoardCore = (() => {
       density: raw.density === 'compact' ? 'compact' : 'comfortable',
       asOf: null,
       projects: raw.projects || [],
+      epics: raw.epics || [],
       events,
       filter: raw.filter || null,
       flagFilter: !!raw.flagFilter,
+      epicFilter: raw.epicFilter || null,
+      groupBy: raw.groupBy || 'none',
+      sortBy: raw.sortBy || 'position',
     };
   }
 

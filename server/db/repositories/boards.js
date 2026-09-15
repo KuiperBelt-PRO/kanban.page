@@ -135,6 +135,7 @@ function getSnapshot(db, idOrSlug) {
       id: p.id,
       slug: p.slug,
       name: p.name,
+      code: p.code || null,
       description: p.description,
     })),
     stages: stageRows.map(s => ({

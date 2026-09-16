@@ -110,6 +110,13 @@ const KuiperUI = (() => {
     return ENTITY_COLORS[(idx >= 0 ? idx : 0) % ENTITY_COLORS.length];
   }
 
+  function tagColor(name) {
+    const s = String(name || '');
+    let h = 0;
+    for (let i = 0; i < s.length; i++) h = ((h << 5) - h) + s.charCodeAt(i);
+    return ENTITY_COLORS[Math.abs(h) % ENTITY_COLORS.length];
+  }
+
   function epicMarkHtml(epic, { label } = {}) {
     const color = epicColor(epic);
     const style = color ? ` style="--c:${esc(color)}"` : '';
@@ -928,6 +935,17 @@ const KuiperUI = (() => {
 
   function init(hooks) {
     ctx = hooks;
+    if (typeof KuiperIssuePanel !== 'undefined') {
+      KuiperIssuePanel.init({
+        ...hooks,
+        esc,
+        renderMarkdown,
+        tagColor,
+        stageLabel,
+        openCard: id => hooks.openEditor?.(id),
+        refreshBoard: () => hooks.render?.(),
+      });
+    }
     document.documentElement.dataset.kuiper = '1';
     ensureSidebar();
     ensureToggle();
@@ -956,6 +974,7 @@ const KuiperUI = (() => {
     if (toggle) toggle.title = tr('workspace');
     if (editorEditingId && !document.getElementById('editor')?.hidden) {
       asideI18n();
+      if (typeof KuiperIssuePanel !== 'undefined') KuiperIssuePanel.i18nPanel();
       syncNotesView();
     }
   }
@@ -1145,6 +1164,10 @@ const KuiperUI = (() => {
       const epicStyle = ec ? ` style="--c:${esc(ec)}"` : '';
       tags.push(`<span class="kuiper-tag epic"${epicStyle}><span class="tag-kind">${esc(tr('epic'))}</span><span class="tag-val"><span class="tri" aria-hidden="true"></span><span class="lbl">${esc(epic.title)}</span></span></span>`);
     }
+    (t.tags || []).slice(0, 3).forEach(name => {
+      const c = tagColor(name);
+      tags.push(`<span class="kuiper-tag label" style="--c:${esc(c)}"><span class="tag-val"><span class="lbl">${esc(name)}</span></span></span>`);
+    });
     const tagsHtml = tags.length ? `<div class="kuiper-card-tags">${tags.join('')}</div>` : '';
     const ageHtml = since ? `<span class="age" title="Untouched for ${since}">${since}</span>` : '';
     return `<div class="kuiper-card-foot">${tagsHtml}${ageHtml}</div>`;
@@ -1755,10 +1778,12 @@ const KuiperUI = (() => {
     aside.className = 'kuiper-editor-aside scroll-quiet';
     aside.id = 'kuiperEditorAside';
     aside.innerHTML = `
-      ${editorSelectMarkup('kuiperEdProjectCtrl', 'project')}
-      ${editorSelectMarkup('kuiperEdEpicCtrl', 'epic')}
-      ${editorSelectMarkup('kuiperEdPriCtrl', 'priority')}
-      <div class="kuiper-ed-field kuiper-ed-flag-wrap" id="kuiperEdFlagWrap"></div>`;
+      <div class="kuiper-aside-group">
+        ${editorSelectMarkup('kuiperEdProjectCtrl', 'project')}
+        ${editorSelectMarkup('kuiperEdEpicCtrl', 'epic')}
+        ${editorSelectMarkup('kuiperEdPriCtrl', 'priority')}
+        <div class="kuiper-ed-field kuiper-ed-flag-wrap" id="kuiperEdFlagWrap"></div>
+      </div>`;
 
     while (body.firstChild) main.append(body.firstChild);
     grid.append(main, aside);
@@ -1952,6 +1977,7 @@ const KuiperUI = (() => {
     syncNotesView(notesEditing);
     scheduleNotesLayout(0);
     asideI18n();
+    if (typeof KuiperIssuePanel !== 'undefined') KuiperIssuePanel.onEditorOpen(editingId, draft);
   }
 
   function onEditorClose() {
@@ -1966,6 +1992,7 @@ const KuiperUI = (() => {
     closeEditorMenu();
     closeDeleteDialog();
     closeDropMenus();
+    if (typeof KuiperIssuePanel !== 'undefined') KuiperIssuePanel.onEditorClose();
   }
 
   function flushEditor() {
@@ -1981,6 +2008,9 @@ const KuiperUI = (() => {
     if ((prev.epicId || null) !== (t.epicId || null)) patch.epic_id = t.epicId || null;
     if ((prev.priority || 0) !== (t.priority || 0)) patch.priority = t.priority || 0;
     if (prev.projectId !== t.projectId) patch.project_id = t.projectId;
+    if (typeof KuiperIssuePanel !== 'undefined') {
+      Object.assign(patch, KuiperIssuePanel.patchFromTask(prev, t));
+    }
     return patch;
   }
 
@@ -2000,6 +2030,8 @@ const KuiperUI = (() => {
       epic_id: patch.epicId || null,
       flagged: !!patch.flag,
       priority: patch.priority || 0,
+      estimated_minutes: patch.estimatedMinutes ?? null,
+      tags: patch.tags || [],
     };
   }
 

@@ -123,8 +123,9 @@ function getSnapshot(db, idOrSlug) {
     epicRows.push(...epics.listByProject(db, p.id));
   }
   const cardsRepo = require('./cards.js');
+  const cardDetail = require('./card-detail.js');
   const cardRows = cardsRepo.listByBoard(db, board.id, { includeArchived: true });
-  return {
+  const snapshot = {
     board: {
       id: board.id,
       slug: board.slug,
@@ -152,6 +153,7 @@ function getSnapshot(db, idOrSlug) {
     cards: cardRows,
     version: getVersion(db, board.id),
   };
+  return cardDetail.enrichSnapshot(db, snapshot);
 }
 
 module.exports = {

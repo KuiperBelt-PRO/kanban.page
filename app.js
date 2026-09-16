@@ -2236,6 +2236,8 @@ function openEditor(id, colId) {
     session: '',
     epicId: (state.epicFilters && state.epicFilters[0]) || state.epicFilter || null,
     priority: 0,
+    tags: [],
+    estimatedMinutes: null,
     flag: state.flagFilter || false, columnId: colId || state.columns[0].id,
   };
 

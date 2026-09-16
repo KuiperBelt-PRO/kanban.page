@@ -31,4 +31,18 @@ function listForReport(db, boardId, { since } = {}) {
   return listForBoard(db, boardId, { since });
 }
 
-module.exports = { insert, listForBoard, listForReport };
+function listForCard(db, cardId) {
+  return db.prepare(`
+    SELECT * FROM card_events WHERE card_id = ?
+    ORDER BY created_at DESC
+  `).all(cardId).map(row => ({
+    id: row.id,
+    card_id: row.card_id,
+    board_id: row.board_id,
+    event_type: row.event_type,
+    payload: row.payload ? JSON.parse(row.payload) : null,
+    created_at: row.created_at,
+  }));
+}
+
+module.exports = { insert, listForBoard, listForReport, listForCard };

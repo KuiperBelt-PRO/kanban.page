@@ -36,7 +36,65 @@ const KuiperStore = (() => {
     });
   }
 
-  return { boardSlug, loadBoard, loadNavigation, patchCard, createCard };
+  async function loadCardDetail(id) {
+    return request(`/api/v1/cards/${encodeURIComponent(id)}/detail`);
+  }
+
+  async function addCardLink(cardId, body) {
+    return request(`/api/v1/cards/${encodeURIComponent(cardId)}/links`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+
+  async function removeCardLink(cardId, linkId) {
+    return request(`/api/v1/cards/${encodeURIComponent(cardId)}/links/${encodeURIComponent(linkId)}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async function addComment(cardId, body) {
+    return request(`/api/v1/cards/${encodeURIComponent(cardId)}/comments`, {
+      method: 'POST',
+      body: JSON.stringify({ body }),
+    });
+  }
+
+  async function addTimeEntry(cardId, body) {
+    return request(`/api/v1/cards/${encodeURIComponent(cardId)}/time-entries`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+
+  async function stopTimer(cardId, entryId, { label } = {}) {
+    return request(`/api/v1/cards/${encodeURIComponent(cardId)}/time-entries/${encodeURIComponent(entryId)}/stop`, {
+      method: 'POST',
+      body: JSON.stringify({ label }),
+    });
+  }
+
+  async function discardTimer(cardId, entryId) {
+    return request(`/api/v1/cards/${encodeURIComponent(cardId)}/time-entries/${encodeURIComponent(entryId)}/discard`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+  }
+
+  return {
+    boardSlug,
+    loadBoard,
+    loadNavigation,
+    patchCard,
+    createCard,
+    loadCardDetail,
+    addCardLink,
+    removeCardLink,
+    addComment,
+    addTimeEntry,
+    stopTimer,
+    discardTimer,
+  };
 })();
 
 if (typeof module !== 'undefined') module.exports = { KuiperStore };

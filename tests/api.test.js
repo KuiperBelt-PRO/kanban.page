@@ -14,14 +14,31 @@ let server;
 let port;
 let tmpDir;
 
-function get(path) {
+function request(method, path, body) {
   return new Promise((resolve, reject) => {
-    http.get(`http://127.0.0.1:${port}${path}`, res => {
+    const opts = {
+      hostname: '127.0.0.1',
+      port,
+      path,
+      method,
+      headers: body ? { 'Content-Type': 'application/json' } : undefined,
+    };
+    const req = http.request(opts, res => {
       let data = '';
       res.on('data', c => { data += c; });
-      res.on('end', () => resolve({ status: res.statusCode, body: JSON.parse(data) }));
-    }).on('error', reject);
+      res.on('end', () => resolve({
+        status: res.statusCode,
+        body: data ? JSON.parse(data) : null,
+      }));
+    });
+    req.on('error', reject);
+    if (body) req.write(JSON.stringify(body));
+    req.end();
   });
+}
+
+function get(path) {
+  return request('GET', path);
 }
 
 before(async () => {
@@ -53,6 +70,18 @@ describe('api', () => {
     assert.equal(res.body.ok, true);
   });
 
+  it('serves kuiper datetime picker static asset', async () => {
+    const res = await new Promise((resolve, reject) => {
+      http.get({ hostname: '127.0.0.1', port, path: '/kuiper-datetime-picker.js' }, r => {
+        let data = '';
+        r.on('data', c => { data += c; });
+        r.on('end', () => resolve({ status: r.statusCode, body: data }));
+      }).on('error', reject);
+    });
+    assert.equal(res.status, 200);
+    assert.match(res.body, /KuiperDateTimePicker/);
+  });
+
   it('returns board snapshot', async () => {
     const res = await get('/api/v1/boards/hub-delivery');
     assert.equal(res.status, 200);
@@ -76,5 +105,50 @@ describe('api', () => {
     assert.ok(Array.isArray(res.body.data.epics));
     assert.ok(res.body.data.tasks.length >= 1);
     assert.ok('priority' in res.body.data.tasks[0]);
+  });
+
+  it('supports tags, time entries and comments on cards', async () => {
+    const board = await get('/api/v1/boards/hub-delivery');
+    const cardId = board.body.data.cards[0].id;
+    const otherId = board.body.data.cards[1]?.id || cardId;
+
+    const tagged = await request('PATCH', `/api/v1/cards/${encodeURIComponent(cardId)}`, {
+      tags: ['backend', 'urgent'],
+      estimated_minutes: 120,
+    });
+    assert.equal(tagged.status, 200);
+    assert.equal(tagged.body.data.card.estimated_minutes, 120);
+
+    const detail = await get(`/api/v1/cards/${encodeURIComponent(cardId)}/detail`);
+    assert.equal(detail.status, 200);
+    assert.equal(detail.body.data.tags.length, 2);
+
+    const comment = await request('POST', `/api/v1/cards/${encodeURIComponent(cardId)}/comments`, {
+      body: '**Hola** desde test',
+    });
+    assert.equal(comment.status, 201);
+
+    const manual = await request('POST', `/api/v1/cards/${encodeURIComponent(cardId)}/time-entries`, {
+      started_at: '2026-03-10T09:00:00.000Z',
+      ended_at: '2026-03-10T10:30:00.000Z',
+      label: 'review',
+    });
+    assert.equal(manual.status, 201);
+    assert.equal(manual.body.data.entry.duration_minutes, 90);
+    assert.ok(manual.body.data.entry.started_at);
+    assert.ok(manual.body.data.entry.ended_at);
+
+    if (otherId !== cardId) {
+      const link = await request('POST', `/api/v1/cards/${encodeURIComponent(cardId)}/links`, {
+        to_card_id: otherId,
+        link_type: 'relates',
+      });
+      assert.equal(link.status, 201);
+    }
+
+    const after = await get(`/api/v1/cards/${encodeURIComponent(cardId)}/detail`);
+    assert.ok(after.body.data.comments.length >= 1);
+    assert.ok(after.body.data.timeEntries.length >= 1);
+    assert.ok(after.body.data.events.length >= 3);
   });
 });

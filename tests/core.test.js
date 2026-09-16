@@ -1337,3 +1337,23 @@ test("a task in a deleted stage lands somewhere real, never nowhere", () => {
   const n = C.merge(noName, noName);
   assert.equal(n.tasks[0].columnId, n.columns[0].id, "migrate's rule: the first stage");
 });
+
+test('parseDuration accepts hours and minutes, rejects days', () => {
+  assert.equal(C.parseDuration('30m'), 30);
+  assert.equal(C.parseDuration('1h'), 60);
+  assert.equal(C.parseDuration('1h 25m'), 85);
+  assert.equal(C.parseDuration('1h25m'), 85);
+  assert.equal(C.parseDuration('8h'), 480);
+  assert.equal(C.parseDuration('90'), 90);
+  assert.equal(C.parseDuration(''), null);
+  assert.equal(C.parseDuration('1d'), null);
+  assert.equal(C.parseDuration('2d 3h'), null);
+  assert.equal(C.parseDuration('0m'), null);
+});
+
+test('formatDurationShort renders compact labels', () => {
+  assert.equal(C.formatDurationShort(30), '30m');
+  assert.equal(C.formatDurationShort(60), '1h');
+  assert.equal(C.formatDurationShort(85), '1h 25m');
+  assert.equal(C.formatDurationShort(0), '');
+});

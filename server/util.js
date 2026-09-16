@@ -36,6 +36,7 @@ function rowToCard(row) {
     flagged: intToBool(row.flagged),
     archived: intToBool(row.archived),
     priority: row.priority != null ? row.priority : 0,
+    estimated_minutes: row.estimated_minutes != null ? row.estimated_minutes : null,
     created_at: row.created_at,
     updated_at: row.updated_at,
   };

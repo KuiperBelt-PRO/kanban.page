@@ -13,3 +13,4 @@ Cada fichero `NNN_*.sql` se ejecuta una sola vez y se registra en `schema_migrat
 | 1 | `001_initial.sql` | Esquema base (org, proyecto, tablero, épica, tarjeta) |
 | 2 | `002_card_priority.sql` | Columna `cards.priority` (0–4) |
 | 3 | `003_project_code_issue_number.sql` | Código de proyecto (`code`) e ID de issue incremental (`PROJ-1`) |
+| 4 | `004_card_collaboration.sql` | Tags, enlaces, tiempo, comentarios y estimación |

@@ -1054,6 +1054,54 @@ const BoardCore = (() => {
     };
   }
 
+  /** Parse human duration (30m, 1h 25m, 8h). Minutes minimum; no days. Returns null if invalid. */
+  function parseDuration(text) {
+    const raw = String(text || '').trim();
+    if (!raw) return null;
+    const compact = raw.toLowerCase().replace(/\s+/g, '');
+    if (!compact || /\d+d/.test(compact)) return null;
+
+    const compactHm = compact.match(/^(\d+)h(?:(\d+)m)?$/);
+    if (compactHm) {
+      const total = parseInt(compactHm[1], 10) * 60 + (compactHm[2] ? parseInt(compactHm[2], 10) : 0);
+      return total >= 1 ? total : null;
+    }
+    const compactM = compact.match(/^(\d+)m$/);
+    if (compactM) {
+      const total = parseInt(compactM[1], 10);
+      return total >= 1 ? total : null;
+    }
+
+    let total = 0;
+    let matched = false;
+    const norm = raw.toLowerCase();
+    const hours = norm.match(/(\d+)\s*h(?:ours?)?/g);
+    const mins = norm.match(/(\d+)\s*m(?:in(?:utes?)?)?/g);
+    if (hours) {
+      matched = true;
+      for (const part of hours) total += parseInt(part, 10) * 60;
+    }
+    if (mins) {
+      matched = true;
+      for (const part of mins) total += parseInt(part, 10);
+    }
+    if (!matched && /^\d+$/.test(norm)) {
+      total = parseInt(norm, 10);
+      matched = true;
+    }
+    return matched && total >= 1 ? total : null;
+  }
+
+  function formatDurationShort(mins) {
+    const m = Math.round(Number(mins) || 0);
+    if (m <= 0) return '';
+    const h = Math.floor(m / 60);
+    const r = m % 60;
+    if (h && r) return `${h}h ${r}m`;
+    if (h) return `${h}h`;
+    return `${m}m`;
+  }
+
   return {
     TZ, MONTHS, DAYS, uid,
     ymd, addDays, weekdayIndex, weekdayName, mondayOf, weekRange, weekLabel, dayLabel, contains,
@@ -1062,6 +1110,7 @@ const BoardCore = (() => {
     reindex, applyOrder, sortByProject, defaultBoard, migrate,
     mtOf, pmtOf, existMtOf, clockMax, canon, stampChanges, syncable, validateSyncable, SYNC_V, merge, unionFloor,
     randomSecret, deriveSync, seal, unseal, bytesToB64u, b64uToBytes,
+    parseDuration, formatDurationShort,
   };
 })();
 

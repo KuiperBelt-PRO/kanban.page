@@ -4,6 +4,11 @@ const path = require('path');
 const boards = require('../db/repositories/boards.js');
 const cards = require('../db/repositories/cards.js');
 const orgs = require('../db/repositories/organizations.js');
+const tags = require('../db/repositories/tags.js');
+const cardLinks = require('../db/repositories/card-links.js');
+const timeEntries = require('../db/repositories/time-entries.js');
+const comments = require('../db/repositories/comments.js');
+const cardDetail = require('../db/repositories/card-detail.js');
 const { snapshotToState, attachOrganization } = require('../board-view.js');
 const { buildNavigation } = require('../navigation.js');
 const { sendJson, readBody, cors } = require('./middleware.js');
@@ -46,6 +51,17 @@ async function handleApi(req, res, db, urlPath, method) {
     }
   }
 
+  const boardTagsMatch = urlPath.match(/^\/api\/v1\/boards\/([^/]+)\/tags$/);
+  if (boardTagsMatch && method === 'GET') {
+    try {
+      const board = boards.resolveBoard(db, decodeURIComponent(boardTagsMatch[1]));
+      if (!board) return notFound(res);
+      return sendJson(res, 200, { ok: true, data: { tags: tags.listByBoard(db, board.id) } });
+    } catch (err) {
+      return badRequest(res, err.message);
+    }
+  }
+
   const boardStateMatch = urlPath.match(/^\/api\/v1\/boards\/([^/]+)\/state$/);
   if (boardStateMatch && method === 'GET') {
     try {
@@ -62,6 +78,115 @@ async function handleApi(req, res, db, urlPath, method) {
       const body = await readBody(req);
       const card = cards.create(db, body);
       return sendJson(res, 201, { ok: true, data: { card } });
+    } catch (err) {
+      return badRequest(res, err.message);
+    }
+  }
+
+  const cardDetailMatch = urlPath.match(/^\/api\/v1\/cards\/([^/]+)\/detail$/);
+  if (cardDetailMatch && method === 'GET') {
+    try {
+      const id = decodeURIComponent(cardDetailMatch[1]);
+      return sendJson(res, 200, { ok: true, data: cardDetail.getDetail(db, id) });
+    } catch (err) {
+      return notFound(res);
+    }
+  }
+
+  const cardLinksMatch = urlPath.match(/^\/api\/v1\/cards\/([^/]+)\/links$/);
+  if (cardLinksMatch && method === 'POST') {
+    try {
+      const id = decodeURIComponent(cardLinksMatch[1]);
+      const body = await readBody(req);
+      const link = cardLinks.add(db, {
+        from_card_id: body.from_card_id || id,
+        to_card_id: body.to_card_id,
+        link_type: body.link_type,
+      });
+      const card = cards.getById(db, id);
+      boards.bumpVersion(db, card.board_id);
+      return sendJson(res, 201, { ok: true, data: { link } });
+    } catch (err) {
+      return badRequest(res, err.message);
+    }
+  }
+
+  const cardLinkDelMatch = urlPath.match(/^\/api\/v1\/cards\/([^/]+)\/links\/([^/]+)$/);
+  if (cardLinkDelMatch && method === 'DELETE') {
+    try {
+      const cardId = decodeURIComponent(cardLinkDelMatch[1]);
+      const linkId = decodeURIComponent(cardLinkDelMatch[2]);
+      cardLinks.remove(db, linkId);
+      const card = cards.getById(db, cardId);
+      boards.bumpVersion(db, card.board_id);
+      return sendJson(res, 200, { ok: true, data: {} });
+    } catch (err) {
+      return badRequest(res, err.message);
+    }
+  }
+
+  const cardCommentsMatch = urlPath.match(/^\/api\/v1\/cards\/([^/]+)\/comments$/);
+  if (cardCommentsMatch && method === 'POST') {
+    try {
+      const id = decodeURIComponent(cardCommentsMatch[1]);
+      const body = await readBody(req);
+      const comment = comments.add(db, id, body.body);
+      const card = cards.getById(db, id);
+      boards.bumpVersion(db, card.board_id);
+      return sendJson(res, 201, { ok: true, data: { comment } });
+    } catch (err) {
+      return badRequest(res, err.message);
+    }
+  }
+
+  const cardTimeMatch = urlPath.match(/^\/api\/v1\/cards\/([^/]+)\/time-entries$/);
+  if (cardTimeMatch && method === 'POST') {
+    try {
+      const id = decodeURIComponent(cardTimeMatch[1]);
+      const body = await readBody(req);
+      const card = cards.getById(db, id);
+      let entry;
+      if (body.action === 'start_timer') {
+        entry = timeEntries.startTimer(db, id, { label: body.label });
+      } else {
+        entry = timeEntries.addManual(db, id, {
+          duration_minutes: body.duration_minutes,
+          started_at: body.started_at,
+          ended_at: body.ended_at,
+          label: body.label,
+        });
+      }
+      boards.bumpVersion(db, card.board_id);
+      return sendJson(res, 201, { ok: true, data: { entry } });
+    } catch (err) {
+      return badRequest(res, err.message);
+    }
+  }
+
+  const cardTimeStopMatch = urlPath.match(/^\/api\/v1\/cards\/([^/]+)\/time-entries\/([^/]+)\/stop$/);
+  if (cardTimeStopMatch && method === 'POST') {
+    try {
+      const cardId = decodeURIComponent(cardTimeStopMatch[1]);
+      const entryId = decodeURIComponent(cardTimeStopMatch[2]);
+      const body = await readBody(req);
+      const entry = timeEntries.stopTimer(db, cardId, entryId, { label: body.label });
+      const card = cards.getById(db, cardId);
+      boards.bumpVersion(db, card.board_id);
+      return sendJson(res, 200, { ok: true, data: { entry } });
+    } catch (err) {
+      return badRequest(res, err.message);
+    }
+  }
+
+  const cardTimeDiscardMatch = urlPath.match(/^\/api\/v1\/cards\/([^/]+)\/time-entries\/([^/]+)\/discard$/);
+  if (cardTimeDiscardMatch && method === 'POST') {
+    try {
+      const cardId = decodeURIComponent(cardTimeDiscardMatch[1]);
+      const entryId = decodeURIComponent(cardTimeDiscardMatch[2]);
+      timeEntries.discardTimer(db, cardId, entryId);
+      const card = cards.getById(db, cardId);
+      boards.bumpVersion(db, card.board_id);
+      return sendJson(res, 200, { ok: true, data: { discarded: true } });
     } catch (err) {
       return badRequest(res, err.message);
     }
@@ -89,7 +214,8 @@ async function handleApi(req, res, db, urlPath, method) {
 
 const STATIC_ROOT = path.join(__dirname, '..', '..');
 const STATIC_FILES = new Set([
-  'index.html', 'app.js', 'core.js', 'i18n.js', 'styles.css', 'kuiper-store.js', 'kuiper-ui.js',
+  'index.html', 'app.js', 'core.js', 'i18n.js', 'styles.css',
+  'kuiper-store.js', 'kuiper-datetime-picker.js', 'kuiper-issue-panel.js', 'kuiper-ui.js',
   'manifest.webmanifest', 'sw.js', 'qr.js',
 ]);
 

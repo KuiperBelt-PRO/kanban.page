@@ -1,232 +1,377 @@
 # board — design brief
 
-A personal kanban for one developer who runs AI coding agents (Claude Code, Codex) in the terminal.
+> **Especificación visual y de componentes (canónica, actualizada):** [`../DESIGN.md`](../DESIGN.md)  
+> **Fork Kuiper (SQLite, API, issue panel):** [`kuiper-architecture.md`](kuiper-architecture.md)
 
-## Hard requirements (from the client)
+A personal kanban for developers who run AI coding agents (Claude Code, Codex) in the terminal. The upstream app ships as vanilla HTML/CSS/JS with optional E2E sync; the **Kuiper fork** adds local SQLite, stable issue IDs (`kb…`), and a full issue editor.
 
-1. **Runs in the browser from local files.** Double-click `index.html`. Vanilla HTML/CSS/JS. No build step, no framework, no network calls, no CDN.
-2. **Storage is `localStorage` only.** No database, no sync, no accounts. Single user, single machine.
-3. **Drag and drop** between stages, and reorder within a stage.
-4. **Session field.** Every card can hold the resume command its agent printed, e.g.
-   `claude --resume 2d2bb76b-e6df-46c5-b742-8eab8c3c7303`. It is a plain text field with a
-   copy control, so the client can paste it into a terminal and continue that session.
-5. **Projects.** Managed in their own section (add / rename / recolor / delete). When creating or
-   editing a task, the project is picked from that list.
-6. **All the important kanban functions**: create, edit, delete, reorder, move, rename stages,
-   add/remove stages, filter, search, undo, backup.
-7. **Weekly progress report.** A button generates a **Markdown file** listing every card that was
-   **created** that week or **moved to another stage** that week, showing **initial state → end state**,
-   **title only** (no description). Clean output.
-   - Weeks run **Monday 00:00 → Sunday 23:59**, in **America/Santiago** (Chile).
-   - The report is delivered Monday morning for the week that just ended.
-   - Dates are stamped automatically, but the client must be able to **override the date** when
-     registering work actually done in a different week.
-   - **Every week is listed** and any past week's summary can be generated at any time,
-     **full or partial** (a subset of the week's entries).
-8. **Aesthetic**: "really cool and clean with awesome animations, but minimalistic, no distractions,
-   no heavy text explanations either. great design is very intuitive."
+---
 
-## Subject and voice
+## Product intent (unchanged)
 
-The defining artifact of this board is not the card — it is the **resume command**. It comes from a
-terminal, it is machine-generated, and it is the thing that gets the client back into flight.
+The defining artifact is not the card — it is the **resume command**. It comes from a terminal, is machine-generated, and is what gets the developer back into flight.
 
-Type direction follows from that: **the machine speaks in monospace** (stage names, counts, session
-strings, dates, week ranges), **the human speaks in Avenir Next** (task titles, notes). Nothing else
-in the UI is allowed to be monospace, so the mono voice always means "this came from the system."
+**Voice:** the machine speaks in **monospace** (stages, counts, sessions, dates, week ranges); the human speaks in **Avenir Next** (titles, notes). Mono always means “from the system.”
 
-Palette: graphite with a violet cast (`#14131A` → `#2E2C3A`), one accent — **amber `#FFB454`**, the
-color of a terminal cursor. Project colors are the only other chroma on screen. Deliberately *not*
-near-black + acid green (terminal cliché), *not* cream + serif + terracotta.
+**Palette:** graphite with a violet cast, one accent — **amber** (terminal cursor). Project/epic/tag colors are the main extra chroma. Deliberately *not* near-black + acid green, *not* cream + serif.
 
-## Direction A — "Workbench" (current build)
+**Aesthetic:** clean, minimal, intuitive motion — no long explanations in the UI.
 
-Board is the whole screen. The report is a modal you summon.
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ ▍board   ● All  ● crm 4  ● webapp 2  ● docs  +      [Search]  ⧉  ＋  ⋯   │  52px rail
-├─────────────────────────────────────────────────────────────────────────────┤
-│ INBOX      3        DOING     2        WAITING   1        DONE      8   [+] │  mono caps
-│ ┌─────────────────┐ ┌─────────────────┐ ┌────────────────┐ ┌──────────────┐ │
-│ │▌Fix webhook retr│ │▌Refactor auth   │ │▌PR #412 review │ │▌Ship v2      │ │
-│ │ crm           ● │ │ crm             │ │ webapp      │ │ docs         │ │
-│ │ ▸ claude --resu…│ │ ▸ codex resume …│ │                │ │              │ │
-│ └─────────────────┘ └─────────────────┘ └────────────────┘ └──────────────┘ │
-│ ┌─────────────────┐                                                          │
-│ │▌Write changelog │   ← 2px left edge = project color                       │
-│ └─────────────────┘                                                          │
-└─────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+  subgraph upstream [Upstream kanban.page]
+    LS[localStorage board.v2]
+    SYNC[E2E sync opcional]
+    PWA[PWA + SW]
+  end
+  subgraph kuiper [Fork Kuiper]
+    SQL[(SQLite kuiper.db)]
+    API[kanban serve :8765]
+    UI["?kuiper=1&board=slug"]
+  end
+  upstream -.->|mismo UI base| kuiper
+  API --> SQL
+  UI --> API
 ```
 
-Card anatomy — the session line is the signature element:
+---
 
-```
-┌──────────────────────────────────┐
-│▌ Fix webhook retries             │   title, Avenir 500/14
-│  Retry with backoff, cap at 5    │   notes, 2-line clamp, muted
-│  crm                          ●  │   project (in project color) · flag
-│ ┌──────────────────────────────┐ │
-│ │ ▸ claude --resume 2d2bb76b…⧉ │ │   mono 11, amber caret, click = copy
-│ └──────────────────────────────┘ │
-└──────────────────────────────────┘
-      ↓ click to copy
-┌──────────────────────────────────┐
-│ │ ▸ copied to clipboard      ✓ │ │   amber sweep, reverts after 1.2s
-└──────────────────────────────────┘
-```
+## Hard requirements (original + current)
 
-Report modal:
+| # | Requirement | Status |
+| --- | --- | --- |
+| 1 | Browser app, vanilla HTML/CSS/JS, no build step | ✅ |
+| 2 | Local-first storage | ✅ Upstream: `localStorage`. Kuiper: SQLite via `kanban serve` |
+| 3 | Drag-and-drop between stages and within a column | ✅ Mouse: 5px move arms drag. Touch: 320ms hold, 8px move cancels |
+| 4 | Session field with copy (`claude --resume …`) | ✅ `.chip` + amber sweep |
+| 5 | Projects: add / rename / recolor / delete | ✅ Panel `P`, 8-color palette |
+| 6 | Core kanban: CRUD, stages, filter, search, undo, backup | ✅ |
+| 7 | Weekly report (America/Santiago, date override, partial export) | ✅ Modal `R`; export by tick |
+| 8 | Minimal, animated, non-distracting UI | ✅ See [`DESIGN.md`](../DESIGN.md) |
+| 9 | *(added)* EN/ES interface | ✅ `i18n.js`, [`i18n-spec.md`](i18n-spec.md) |
+| 10 | *(added)* Optional E2E sync between devices | ✅ `docs/sync.md` — not used in Kuiper local mode |
+| 11 | *(added, Kuiper)* Issue IDs, epics, priority, tags, links, time, comments, history | ✅ `?kuiper=1` |
 
-```
-┌── ‹  MON 3 – SUN 9 MAR 2026  ›            [ this week ▾ ]   × ──┐
-│    9 cards · 3 created · 4 finished                              │
-├──────────────────────────────────────────────────────────────────┤
-│ ☑ crm                                                            │
-│   ☑ Fix webhook retries          INBOX → DONE          [3 Mar]   │
-│   ☑ Refactor auth                NEW   → DOING         [5 Mar]   │
-│ ☑ webapp                                                      │
-│   ☐ PR #412 review               DOING → WAITING       [6 Mar]   │
-├──────────────────────────────────────────────────────────────────┤
-│ Select all                          Copy markdown   Download .md │
-└──────────────────────────────────────────────────────────────────┘
-```
+---
 
-## Direction B — "Week ledger"
+## Layout direction — resolved
 
-Board on the left, a permanent narrow **week strip** on the right that logs every move as it happens
-(today's entries at top). The report is not a modal you summon — it is always visible, and the
-button just exports what you can already see.
-
-```
-┌──────────────────────────────────────────────┬──────────────────┐
-│ INBOX     DOING     WAITING    DONE          │ WEEK 3–9 MAR  ⤓ │
-│ ┌───┐     ┌───┐     ┌───┐      ┌───┐         │ ─────────────── │
-│ │   │     │   │     │   │      │   │         │ TUE 4           │
-│ └───┘     └───┘     └───┘      └───┘         │  Fix webhook    │
-│ ┌───┐               ┌───┐                    │  inbox → doing  │
-│ │   │               │   │                    │ MON 3           │
-│ └───┘               └───┘                    │  Refactor auth  │
-│                                              │  new → inbox    │
-└──────────────────────────────────────────────┴──────────────────┘
+```mermaid
+flowchart LR
+  A["✅ A Workbench<br/>board + overlays"] 
+  B["❌ B Week ledger<br/>strip permanente"]
+  C["❌ C Command surface<br/>solo ⌘K"]
+  A -->|shipped| WIN[Decisión final]
+  B -->|rechazado| R1["−260px · 2 scrolls"]
+  C -->|rechazado| R2["alto coste aprendizaje"]
 ```
 
-Trade-off: the week is never out of sight, which suits someone who must report weekly — but it costs
-~260px of board width permanently and adds a second scrolling surface. Against "no distractions."
+### ✅ Direction A — “Workbench” (shipped)
 
-## Direction C — "Command surface"
+Board is the whole screen. Report, editor, projects, archive, and sync are **overlays** (sheet / panel), not permanent chrome.
 
-No rail. The board is the only chrome; everything (new task, project, report, week, theme) happens in
-a ⌘K palette. Maximum minimalism, highest learning cost — bad fit for "great design is very intuitive"
-unless the palette is discoverable from an empty state.
+```mermaid
+block-beta
+  columns 1
+  block:chrome:1
+    columns 5
+    menu["≡ sidebar"]
+    title["tablero"]
+    filt["filtros"]
+    srch["búsqueda"]
+    acts["R · N · ⋯"]
+  end
+  block:cols:4
+    columns 4
+    c1["INBOX"]
+    c2["DOING"]
+    c3["WAITING"]
+    c4["DONE"]
+  end
+  block:overlay:1
+    columns 3
+    sheet["sheet · informe · editor"]
+    panel["panel · proyectos · archivo"]
+    side["kuiper-side"]
+  end
+```
+
+### ❌ Direction B — “Week ledger” (rejected)
+
+Permanent week strip costs ~260px and a second scroll surface — conflicts with “no distractions.”
+
+### ❌ Direction C — “Command surface” (rejected)
+
+⌘K-only chrome raises learning cost — conflicts with “intuitive.”
+
+---
+
+## Card anatomy (upstream + Kuiper)
+
+```mermaid
+block-beta
+  columns 1
+  block:card:1
+    columns 1
+    row1["kb0042 · prioridad · ★ flag"]
+    row2["▌ título — ui 14px"]
+    row3["notas — muted, 2 líneas"]
+    row4["tags proyecto / épica"]
+    row5["▸ sesión agente — mono + copy"]
+  end
+```
+
+| Zona | Voz | Detalle |
+| --- | --- | --- |
+| ID + prioridad | mono | Esquina superior; flag se desplaza si hay prioridad |
+| Título | ui | `.card h3` |
+| Notas | ui muted | clamp 2 líneas |
+| Tags (Kuiper) | ui + `--c` | dot proyecto, triángulo épica |
+| Sesión | mono | `.chip`, sweep ámbar 1.2s al copiar |
+| Borde izq. | `--c` | 2px = color de proyecto |
+
+---
+
+## Kuiper issue editor (modal sheet)
+
+Large sheet (`min(960px)`, ~90vh): **main** (título, etapas, descripción markdown, enlaces, tabs) + **aside** 248px (proyecto, épica, prioridad, flag, tags, estimación, timer).
+
+- Enlaces estilo Jira bajo descripción, antes de tabs.
+- Tabs: Comentarios | Registro de tiempo | Historial — mismo fondo scroll que notas.
+- Footer clásico oculto; acciones en menú `⋯` del header.
+
+Detalle completo: [`DESIGN.md` §11](../DESIGN.md).
+
+```mermaid
+flowchart TB
+  subgraph main [Main — scroll vertical]
+    T[título + etapas .seg]
+    N[descripción markdown]
+    L[enlaces vinculados]
+    TB[tabs: comentarios · tiempo · historial]
+    T --> N --> L --> TB
+  end
+  subgraph aside [Aside 248px]
+    P[proyecto · épica · prioridad]
+    F[flag]
+    X[tags · estimación · timer]
+    P --> F --> X
+  end
+  main --- aside
+```
+
+---
 
 ## Data model
+
+### Upstream (`localStorage`, `board.v2` or `board.v2.<ns>`)
 
 ```js
 {
   v: 2,
   theme: 'dark' | 'light',
-  asOf: null | '2026-03-05',        // date override for logging; null = today (Chile)
-  columns: [{ id, name }],           // ordered = stage order
+  density: 'comfortable' | 'compact',
+  locale: 'en' | 'es',              // also board.locale key globally
+  asOf: null | 'YYYY-MM-DD',        // Chile calendar; null = today
+  columns: [{ id, name }],          // order = stage order; rightmost = done
   projects: [{ id, name, color }],
-  tasks:   [{ id, title, notes, projectId, session, flag, columnId, order, createdAt, updatedAt,
-              archivedAt?, archivedFrom? }],  // set only once archived
-  events:  [{ id, taskId, title, type: 'created'|'moved', from, to, at, day }],
-  filter: null | projectId
+  tasks: [{
+    id, title, notes, projectId, session, flag,
+    columnId, order, createdAt, updatedAt,
+    archivedAt?, archivedFrom?,
+  }],
+  events: [{ id, taskId, title, type: 'created'|'moved', from, to, at, day }],
+  filter: null | projectId,         // legacy single filter
+  flagFilter: boolean,
+  // + sync metadata when enabled (_contentGen, clocks, etc.) — see CLAUDE.md
 }
 ```
 
-`events` is the report's source of truth and is append-only.
+### Kuiper (SQLite — see migrations)
 
-- `from` / `to` store **stage names as strings**, snapshotted at the time of the event, so renaming
-  or deleting a stage later cannot corrupt history.
-- `title` is likewise snapshotted, but the report prefers the task's *current* title when the task
-  still exists (so a fixed typo shows up in the report).
-- `at` is epoch ms, used only for ordering within a day.
-- `day` is the **`YYYY-MM-DD` calendar date in America/Santiago** — this, not `at`, is what the
-  report groups by. That is what makes the date override work: overriding rewrites `day`, never `at`.
+Cards add: `priority` (0–4), `estimated_minutes`, `issue_number`, tags, comments, time entries, card links, event log for history. IDs stable `kb…` for Git branches. Board loaded via API; UI state (filters, group, sort, favorites) in `board.kuiper.prefs`.
 
-### Archive
-
-Done is a buffer, not a graveyard and not a shredder. Finished cards get **archived**: they keep
-their row in `tasks` and only gain `archivedAt` (epoch ms) and `archivedFrom` (the stage name,
-snapshotted, because stages get renamed and deleted). Anything with `archivedAt` is filtered out of
-the board, the stage counts and the project counts, and appears in the Archive panel instead.
-
-**The board can only archive; only the archive can delete.** That is the whole safety property:
-nothing on the board is one click from gone, and the single irreversible action lives in one place,
-behind a two-step confirm (Delete → "Sure?", disarming after ~3s). No modal — a confirm dialog for a
-one-person board is ceremony.
-
-Neither archiving nor deleting can damage the weekly report, for different reasons. An archived task
-still exists, so the report resolves its live title as usual. A deleted one is gone from `tasks`, so
-the report falls back to the title snapshotted on its events and flags the row `deleted` — the same
-path a deleted card always took. Clearing the board never costs you a week's history.
-
-Adding and removing **stages** is deliberately not on this path: it is a once-a-year action, so it
-carries no standing chrome. "Add stage" lives in the ⋯ menu, with a hairline `+` in the header row
-that only appears while the pointer is on the board.
-
-### Week math
-
-`America/Santiago` is UTC−3 / UTC−4 with DST, so week boundaries can never be computed from raw
-epoch arithmetic. Every date decision goes through the calendar date:
-
-```js
-ymd(ts)        // Intl.DateTimeFormat('en-CA', {timeZone:'America/Santiago'}) → "2026-03-05"
-mondayOf(ymd)  // shift the *calendar* date back to Monday (ISO weekday), no epoch math
-weekOf(ymd)    // { monday, sunday, label: "3–9 Mar 2026" }
+```mermaid
+erDiagram
+  BOARD ||--o{ COLUMN : has
+  BOARD ||--o{ PROJECT : has
+  BOARD ||--o{ EPIC : has
+  BOARD ||--o{ CARD : has
+  PROJECT ||--o{ CARD : assigns
+  EPIC ||--o{ CARD : groups
+  CARD ||--o{ TAG : has
+  CARD ||--o{ COMMENT : has
+  CARD ||--o{ TIME_ENTRY : logs
+  CARD ||--o{ CARD_LINK : links
+  CARD ||--o{ EVENT : history
+  COLUMN ||--o{ CARD : contains
 ```
 
-### Report aggregation
+---
 
-For the selected week, walk that week's events in `(day, at)` order and fold them per task:
+## Events and report
 
-- first event's `from` → the entry's **initial state** (`New` if the first event is `created`)
-- last event's `to` → the entry's **end state**
-- a task created *and* moved in the same week shows `NEW → <final stage>`
-- a task moved in an earlier week and again this week starts from the stage it was in *this* week
-- deleted tasks still appear — the work happened
-- entries group by project; unassigned tasks group under "No project"
+`events` is append-only for the weekly report.
 
-Markdown output:
+- `from` / `to`: **stage names as strings** at event time.
+- `title`: snapshotted; report prefers live task title if it still exists.
+- `at`: epoch ms — order within a day only.
+- `day`: `YYYY-MM-DD` in **America/Santiago** — grouping key; override rewrites `day`, never `at`.
+
+**Week math:** never raw epoch week boundaries — use `ymd`, `mondayOf`, `weekOf` in `core.js`.
+
+**Modal vs export:**
+
+```mermaid
+flowchart TD
+  E[events append-only] --> AGG[aggregateWeek]
+  AGG --> MOD[Modal informe R]
+  MOD --> TENSE{Agrupa por tense}
+  TENSE --> SH[shipped]
+  TENSE --> IF[inflight]
+  MOD --> TICK{Usuario marca filas}
+  TICK --> MD[toMarkdown]
+  MD --> OUT["## Shipped / ## In flight<br/>solo título · proyecto"]
+  MOD --> VIEW["Muestra ruta FROM → TO<br/>counts en cabecera"]
+```
+
+- Modal: all created/moved cards; grouped by **tense** (`shipped` vs `inflight`); shows route `FROM → TO`; user **ticks** rows to export.
+- Markdown export: **title only**, grouped in `## Shipped` / `## In flight`, optional ` · Project` suffix — no counts, no routes.
 
 ```markdown
-# Progress — 3–9 Mar 2026
+# Progress — 10–16 Aug 2026
 
-9 cards · 3 created · 4 finished
+## Shipped
+- Onboarding tour v2 · Website
 
-## crm
-- Fix webhook retries — Inbox → Done
-- Refactor auth — New → Doing
-
-## webapp
-- PR #412 review — Doing → Waiting
-
-## No project
-- Buy domain — New → Done
+## In flight
+- Invoice PDF export · API
 ```
 
-## Motion spec
+**Date override:** per-row control `.rep-row .rd` in the report — tap opens date picker; discoverable but requires explicit action.
+
+---
+
+## Archive
+
+Done is a buffer, not a shredder. Archive sets `archivedAt` + `archivedFrom` (stage name snapshot). Archived tasks leave the board and appear in panel `A`.
+
+```mermaid
+stateDiagram-v2
+  [*] --> OnBoard: tarjeta activa
+  OnBoard --> Archived: Archive en editor
+  Archived --> OnBoard: Restore en panel A
+  Archived --> Deleted: Delete → Sure? en 3.2s
+  Deleted --> [*]
+  note right of OnBoard: board nunca borra
+  note right of Deleted: solo en panel Archive
+```
+
+**Safety:** board can only archive; **permanent delete only in Archive**, two-step: Delete → “Sure?” (`ARM_MS = 3200`), class `.ghost.danger.armed`. No modal dialog.
+
+Report history survives archive and delete (snapshotted titles / `deleted` marker).
+
+**Stages:** add/remove via ⋯ menu; ghost `+` column header on board hover only.
+
+---
+
+## Creation flows — resolved
+
+```mermaid
+flowchart TD
+  N[Atajo N / botón +] --> COMP{¿inline?}
+  COMP -->|Enter en phantom| QC[Quick composer]
+  COMP -->|click tarjeta| ED[Sheet editor]
+  QC --> SAVE[Guardar → tarjeta]
+  ED --> KUI{?kuiper=1}
+  KUI -->|sí| GRID[.kuiper-editor grid]
+  KUI -->|no| CLASSIC[editor clásico + footer]
+```
+
+| Flow | Decision |
+| --- | --- |
+| Quick composer | ✅ Inline in column (`.composer` / `.phantom` + blinking cursor) |
+| Full editor | ✅ Click card or `N` — sheet editor |
+| Kuiper | ✅ Same sheet, transformed to `.kuiper-editor` grid |
+
+---
+
+## Empty states — resolved
+
+No tutorial copy. Empty columns use **`.phantom`** (quiet slot + amber cursor blink). Empty lists use one line, `--faint`, often italic (`noArchived`, `kuiper-panel-empty`, archive/projects placeholders).
+
+---
+
+## Chroma — resolved
+
+One accent + **eight project colors** (same as entity palette). **No stage-level color.** Kuiper adds priority hues and per-tag hash colors — still bounded to the same palette logic. See [`DESIGN.md` §8](../DESIGN.md).
+
+---
+
+## Motion spec (as implemented)
+
+Values from `app.js` + `styles.css`. Easing: `cubic-bezier(.2,.8,.25,1)` (`--ease` / `EASE`).
+
+```mermaid
+sequenceDiagram
+  actor U as Usuario
+  participant C as Card
+  participant G as Ghost
+  participant B as Board
+  U->>C: pointer down
+  alt mouse ≥5px
+    C->>G: clone + lift scale 1.02
+    G-->>B: tilt ±4.5°
+    U->>G: drop
+    G->>B: animate 190ms
+    B->>B: FLIP vecinos 260ms
+  else touch hold 320ms
+    C->>G: lift sin scroll previo
+  end
+  U->>C: click sin drag
+  C->>C: abrir editor sheet
+```
 
 | Moment | Behaviour |
-|---|---|
-| Card lift | pointer drag, 5px threshold, ghost scales 1.03 + rotates 0.6°, shadow deepens |
-| Neighbours | FLIP: every card animates from its old rect to its new one, 260ms, `cubic-bezier(.2,.8,.25,1)` |
-| Drop | ghost flies to the placeholder rect (190ms), then vanishes — no snap |
-| Column hover | drop target column tints its background |
-| Copy | amber sweep across the chip, label swaps to `copied to clipboard`, reverts after 1.2s |
-| Card add | fade + rise 9px, scale .985 → 1 |
-| Filter / search | FLIP again — cards visibly travel to their new positions instead of blinking |
-| Modal | scale .985 + 10px rise, backdrop blur |
-| Cursor | 6×13px amber block, 1.15s step-blink, in the wordmark |
-| Reduced motion | all durations collapse to ~0 |
+| --- | --- |
+| Card drag (mouse) | 5px movement arms drag |
+| Card drag (touch) | 320ms hold lifts; &lt;8px move before hold = scroll |
+| Ghost lift | `.card-ghost.lift` → `scale(1.02)`; tilt ±4.5° from velocity |
+| Drop | Ghost animates to slot **190ms**, then removed |
+| FLIP neighbours | **260ms** staggered (sort-by-project caps step ~45ms) |
+| Column / project row drag | Same ghost language, 190ms settle |
+| Copy session | `.chip.copied` — `wash` 760ms; revert **1200ms** |
+| Card enter | `cardIn` 240ms, `translateY(6px)` |
+| Composer | `cardIn` 220ms |
+| Filter pill enter | `pillIn` 200ms |
+| Modal / sheet | `sheetIn` 240ms — opacity + `translateY(10px)` + `scale(.985)`; scrim `fade` 180ms, blur 3px |
+| Panel | `panelIn` 260ms from right |
+| Menu | `menuIn` 160ms |
+| Toast | `toastIn` 260ms / `toastOut` 180ms |
+| Brand cursor | `.blink` 6×13px, 1.15s step |
+| Timer discard | `kuiper-discard-pulse` 2.6s on dashed border |
+| Reduced motion | All durations → ~0 |
 
-## Open questions for review
+---
 
-1. Is the report a **modal** (A), a **permanent panel** (B), or something else?
-2. Where does the **date override** live so it is discoverable but never fires by accident?
-3. Is the quick composer (type title inline in a column, Enter to add) enough, or should every
-   creation open the full editor?
-4. What is the **empty state** — the client explicitly does not want explanatory text.
-5. Is one accent + project colors enough chroma, or does the board need stage-level color?
+## Open questions — all closed
+
+| Question | Resolution |
+| --- | --- |
+| Report modal vs panel? | **Modal** (Direction A) |
+| Date override placement? | **Per row** in report modal |
+| Composer vs full editor? | **Both** |
+| Empty state? | **Phantom + faint one-liners**, no prose |
+| Stage colors? | **No** — project/epic/tag/priority only |
+
+---
+
+## What to read next
+
+| Need | Document |
+| --- | --- |
+| Tokens, components, Kuiper UI rules | [`DESIGN.md`](../DESIGN.md) |
+| Sync invariants | [`sync.md`](sync.md) |
+| CLI / agents | [`cli.md`](cli.md), [`agents.md`](agents.md) |
+| i18n | [`i18n-spec.md`](i18n-spec.md) |
+| Code architecture | [`CLAUDE.md`](../CLAUDE.md) |

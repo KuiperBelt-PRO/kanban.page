@@ -1163,32 +1163,124 @@ const KuiperUI = (() => {
   let editorLayoutReady = false;
   let notesEditing = false;
   let editorEditingId = null;
+  let pendingNotesCaret = null;
+  let pendingScrollAnchor = null;
+  let notesScrollAnchor = null;
+  let notesCaretMirror = null;
 
-  function inlineMarkdown(s) {
-    let t = esc(s);
-    t = t.replace(/`([^`]+)`/g, '<code class="md-code">$1</code>');
-    t = t.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-    t = t.replace(/\*([^*]+)\*/g, '<em>$1</em>');
-    t = t.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, text, url) => {
-      const u = String(url).trim();
-      if (!/^https?:\/\//i.test(u)) return esc(text);
-      return `<a href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(text)}</a>`;
-    });
-    return t;
+  function buildLineOffsets(lines) {
+    const offs = new Array(lines.length);
+    let acc = 0;
+    for (let li = 0; li < lines.length; li++) {
+      offs[li] = acc;
+      acc += lines[li].length + 1;
+    }
+    return offs;
+  }
+
+  function spanMapped(off, len, html) {
+    return `<span class="md-s" data-off="${off}" data-len="${len}">${html}</span>`;
+  }
+
+  function inlineMarkdownMapped(text, baseOff) {
+    const src = String(text);
+    let out = '';
+    let i = 0;
+    while (i < src.length) {
+      if (src[i] === '`') {
+        const end = src.indexOf('`', i + 1);
+        if (end > i) {
+          const inner = src.slice(i + 1, end);
+          const off = baseOff + i + 1;
+          out += `<code class="md-code" data-off="${off}" data-len="${inner.length}">${esc(inner)}</code>`;
+          i = end + 1;
+          continue;
+        }
+      }
+      const bold = src.slice(i).match(/^\*\*([^*]+)\*\*/);
+      if (bold) {
+        const inner = bold[1];
+        const off = baseOff + i + 2;
+        out += `<strong data-off="${off}" data-len="${inner.length}">${esc(inner)}</strong>`;
+        i += bold[0].length;
+        continue;
+      }
+      const italic = src.slice(i).match(/^\*([^*]+)\*/);
+      if (italic) {
+        const inner = italic[1];
+        const off = baseOff + i + 1;
+        out += `<em data-off="${off}" data-len="${inner.length}">${esc(inner)}</em>`;
+        i += italic[0].length;
+        continue;
+      }
+      const link = src.slice(i).match(/^\[([^\]]+)\]\(([^)]+)\)/);
+      if (link) {
+        const linkText = link[1];
+        const url = String(link[2]).trim();
+        const off = baseOff + i + 1;
+        const len = linkText.length;
+        if (/^https?:\/\//i.test(url)) {
+          out += `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer" data-off="${off}" data-len="${len}">${esc(linkText)}</a>`;
+        } else {
+          out += spanMapped(off, len, esc(linkText));
+        }
+        i += link[0].length;
+        continue;
+      }
+      let j = i;
+      while (j < src.length && src[j] !== '`' && src[j] !== '*' && src[j] !== '[') j += 1;
+      if (j > i) {
+        const run = src.slice(i, j);
+        out += spanMapped(baseOff + i, run.length, esc(run));
+        i = j;
+        continue;
+      }
+      out += spanMapped(baseOff + i, 1, esc(src[i]));
+      i += 1;
+    }
+    return out;
+  }
+
+  function joinMappedParts(parts, gapOffs) {
+    if (!parts.length) return '';
+    let html = parts[0];
+    for (let pi = 1; pi < parts.length; pi++) {
+      html += `<span class="md-s md-gap" data-off="${gapOffs[pi - 1]}" data-len="1"> </span>${parts[pi]}`;
+    }
+    return html;
+  }
+
+  function isHrLine(line) {
+    return /^ {0,3}(-{3,}|\*{3,}|_{3,})\s*$/.test(line);
+  }
+
+  function isSetextH1Underline(line) {
+    return /^ {0,3}=+\s*$/.test(line);
   }
 
   function renderMarkdown(raw) {
     if (!raw?.trim()) return '';
+    const src = String(raw).replace(/\r\n/g, '\n');
+    const lines = src.split('\n');
+    const lineOff = buildLineOffsets(lines);
     const blocks = [];
-    const lines = String(raw).replace(/\r\n/g, '\n').split('\n');
     let i = 0;
     let inCode = false;
     let codeBuf = [];
+    let codeStartLine = 0;
     while (i < lines.length) {
       const line = lines[i];
       if (line.startsWith('```')) {
-        if (!inCode) { inCode = true; codeBuf = []; i += 1; continue; }
-        blocks.push(`<pre class="md-pre"><code>${esc(codeBuf.join('\n'))}</code></pre>`);
+        if (!inCode) {
+          inCode = true;
+          codeBuf = [];
+          codeStartLine = i + 1;
+          i += 1;
+          continue;
+        }
+        const codeText = codeBuf.join('\n');
+        const off = codeStartLine < lines.length ? lineOff[codeStartLine] : src.length;
+        blocks.push(`<pre class="md-pre"><code data-off="${off}" data-len="${codeText.length}">${esc(codeText)}</code></pre>`);
         inCode = false;
         i += 1;
         continue;
@@ -1197,29 +1289,52 @@ const KuiperUI = (() => {
       const head = line.match(/^(#{1,3})\s+(.*)$/);
       if (head) {
         const lvl = head[1].length;
-        blocks.push(`<h${lvl} class="md-h${lvl}">${inlineMarkdown(head[2])}</h${lvl}>`);
+        const contentOff = lineOff[i] + head[1].length + 1;
+        blocks.push(`<h${lvl} class="md-h${lvl}">${inlineMarkdownMapped(head[2], contentOff)}</h${lvl}>`);
         i += 1;
         continue;
       }
       if (/^[-*]\s+/.test(line)) {
         const items = [];
         while (i < lines.length && /^[-*]\s+/.test(lines[i])) {
-          items.push(`<li>${inlineMarkdown(lines[i].replace(/^[-*]\s+/, ''))}</li>`);
+          const m = lines[i].match(/^[-*]\s+/);
+          const contentOff = lineOff[i] + m[0].length;
+          items.push(`<li>${inlineMarkdownMapped(lines[i].slice(m[0].length), contentOff)}</li>`);
           i += 1;
         }
         blocks.push(`<ul class="md-ul">${items.join('')}</ul>`);
         continue;
       }
       if (!line.trim()) { i += 1; continue; }
+      if (isHrLine(line)) {
+        blocks.push('<hr class="md-hr">');
+        i += 1;
+        continue;
+      }
+      const next = lines[i + 1];
+      if (next != null && isSetextH1Underline(next) && line.trim() && !line.startsWith('```')) {
+        const trimmed = line.trim();
+        const lead = line.length - line.trimStart().length;
+        const contentOff = lineOff[i] + lead;
+        blocks.push(`<h1 class="md-h1">${inlineMarkdownMapped(trimmed, contentOff)}</h1>`);
+        i += 2;
+        continue;
+      }
       const paras = [];
+      const paraStarts = [];
       while (i < lines.length && lines[i].trim()
         && !lines[i].startsWith('```')
         && !/^(#{1,3})\s/.test(lines[i])
-        && !/^[-*]\s+/.test(lines[i])) {
+        && !/^[-*]\s+/.test(lines[i])
+        && !isHrLine(lines[i])
+        && !isSetextH1Underline(lines[i])) {
         paras.push(lines[i]);
+        paraStarts.push(i);
         i += 1;
       }
-      blocks.push(`<p class="md-p">${inlineMarkdown(paras.join(' '))}</p>`);
+      const parts = paras.map((pl, idx) => inlineMarkdownMapped(pl, lineOff[paraStarts[idx]]));
+      const gaps = paras.slice(0, -1).map((pl, idx) => lineOff[paraStarts[idx]] + pl.length);
+      blocks.push(`<p class="md-p">${joinMappedParts(parts, gaps)}</p>`);
     }
     return `<div class="kuiper-md">${blocks.join('')}</div>`;
   }
@@ -1310,28 +1425,272 @@ const KuiperUI = (() => {
     panel.style.zIndex = '130';
   }
 
+  function textOffsetInMarked(root, container, offset) {
+    const walker = root.ownerDocument.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let n = 0;
+    while (walker.nextNode()) {
+      const node = walker.currentNode;
+      if (node === container) return n + offset;
+      n += node.textContent.length;
+    }
+    return n + offset;
+  }
+
+  function sourceOffsetFromPoint(root, x, y) {
+    const doc = root.ownerDocument;
+    let range = null;
+    if (doc.caretRangeFromPoint) range = doc.caretRangeFromPoint(x, y);
+    else if (doc.caretPositionFromPoint) {
+      const pos = doc.caretPositionFromPoint(x, y);
+      if (pos) {
+        range = doc.createRange();
+        range.setStart(pos.offsetNode, pos.offset);
+        range.collapse(true);
+      }
+    }
+    if (!range || !root.contains(range.startContainer)) {
+      const ta = document.getElementById('f-notes');
+      return ta?.value?.length || 0;
+    }
+
+    let node = range.startContainer;
+    let charOff = range.startOffset;
+    if (node.nodeType === Node.ELEMENT_NODE) {
+      const child = node.childNodes[charOff] || node.childNodes[Math.max(0, charOff - 1)];
+      if (child?.nodeType === Node.TEXT_NODE) {
+        node = child;
+        charOff = 0;
+      } else if (child?.nodeType === Node.ELEMENT_NODE) {
+        const marker = child.dataset?.off != null ? child : child.querySelector?.('[data-off]');
+        if (marker?.dataset?.off != null) return parseInt(marker.dataset.off, 10);
+      }
+    }
+
+    const marker = (node.nodeType === Node.TEXT_NODE ? node.parentElement : node)?.closest?.('[data-off]');
+    if (!marker) return 0;
+    const base = parseInt(marker.dataset.off, 10);
+    const len = parseInt(marker.dataset.len || '0', 10);
+    const within = textOffsetInMarked(marker, node, charOff);
+    return base + (len > 0 ? Math.min(within, len) : within);
+  }
+
+  function notesWrap() {
+    return document.querySelector('.kuiper-notes-wrap');
+  }
+
+  function clampNotesScrollTop(wrap, top) {
+    const max = Math.max(0, wrap.scrollHeight - wrap.clientHeight);
+    return Math.max(0, Math.min(top, max));
+  }
+
+  function captureClickContentY(wrap, preview, clientX, clientY) {
+    const doc = preview.ownerDocument;
+    let y = clientY;
+    if (doc.caretRangeFromPoint) {
+      const range = doc.caretRangeFromPoint(clientX, clientY);
+      if (range && preview.contains(range.startContainer)) {
+        const rect = range.getBoundingClientRect();
+        y = rect.top + rect.height * 0.5;
+      }
+    }
+    const wrapRect = wrap.getBoundingClientRect();
+    return wrap.scrollTop + (y - wrapRect.top);
+  }
+
+  function ensureCaretMirror() {
+    if (!notesCaretMirror) {
+      notesCaretMirror = document.createElement('div');
+      notesCaretMirror.setAttribute('aria-hidden', 'true');
+      notesCaretMirror.style.cssText = 'position:fixed;visibility:hidden;overflow:hidden;pointer-events:none;z-index:-1;';
+      document.body.append(notesCaretMirror);
+    }
+    return notesCaretMirror;
+  }
+
+  function syncCaretMirror(ta) {
+    const mirror = ensureCaretMirror();
+    const s = getComputedStyle(ta);
+    const taRect = ta.getBoundingClientRect();
+    mirror.style.top = `${taRect.top}px`;
+    mirror.style.left = `${taRect.left}px`;
+    mirror.style.width = `${ta.clientWidth}px`;
+    mirror.style.font = s.font;
+    mirror.style.lineHeight = s.lineHeight;
+    mirror.style.padding = s.padding;
+    mirror.style.border = s.border;
+    mirror.style.boxSizing = s.boxSizing;
+    mirror.style.letterSpacing = s.letterSpacing;
+    mirror.style.whiteSpace = 'pre-wrap';
+    mirror.style.wordWrap = 'break-word';
+    mirror.style.tabSize = s.tabSize;
+  }
+
+  function caretClientYInTextarea(ta, pos) {
+    const mirror = ensureCaretMirror();
+    syncCaretMirror(ta);
+    const val = ta.value;
+    mirror.replaceChildren();
+    mirror.append(document.createTextNode(val.slice(0, pos)));
+    const marker = document.createElement('span');
+    marker.textContent = val.slice(pos, pos + 1) || '\u200b';
+    mirror.append(marker);
+    const rect = marker.getBoundingClientRect();
+    return rect.top + rect.height * 0.5;
+  }
+
+  function caretContentYInWrap(wrap, ta, pos) {
+    const wrapRect = wrap.getBoundingClientRect();
+    return wrap.scrollTop + (caretClientYInTextarea(ta, pos) - wrapRect.top);
+  }
+
+  function fitNotesTextarea() {
+    const ta = document.getElementById('f-notes');
+    if (!ta || !notesEditing) return;
+    ta.style.height = 'auto';
+    ta.style.height = `${ta.scrollHeight}px`;
+  }
+
+  function restoreNotesScroll(top) {
+    const wrap = notesWrap();
+    if (!wrap || top == null) return;
+    wrap.scrollTop = clampNotesScrollTop(wrap, top);
+  }
+
+  function scheduleNotesLayout(scrollTop) {
+    const snap = scrollTop;
+    const run = () => {
+      fitNotesTextarea();
+      restoreNotesScroll(snap);
+    };
+    requestAnimationFrame(() => {
+      run();
+      requestAnimationFrame(run);
+    });
+  }
+
+  function resetNotesScrollLayout() {
+    const wrap = notesWrap();
+    const ta = document.getElementById('f-notes');
+    if (ta) ta.style.height = '';
+    if (wrap) wrap.scrollTop = 0;
+  }
+
+  function captureAnchorFromTextarea() {
+    const ta = document.getElementById('f-notes');
+    const wrap = notesWrap();
+    if (!ta || !wrap) return null;
+    return {
+      sourceOffset: ta.selectionStart || 0,
+      scrollTop: wrap.scrollTop,
+    };
+  }
+
+  function applyNotesScrollOnEnter(anchor) {
+    const wrap = notesWrap();
+    const ta = document.getElementById('f-notes');
+    if (!wrap || !ta || !anchor) return;
+    fitNotesTextarea();
+    const pos = anchor.sourceOffset ?? ta.selectionStart;
+    ta.setSelectionRange(pos, pos);
+    if (anchor.clickContentY != null) {
+      const caretY = caretContentYInWrap(wrap, ta, pos);
+      const viewOffset = anchor.clickContentY - (anchor.scrollTop ?? 0);
+      wrap.scrollTop = clampNotesScrollTop(wrap, caretY - viewOffset);
+    } else {
+      restoreNotesScroll(anchor.scrollTop ?? 0);
+    }
+  }
+
+  function applyNotesScrollOnExit(anchor) {
+    restoreNotesScroll(anchor?.scrollTop ?? 0);
+  }
+
+  function scheduleNotesScrollOnEnter(anchor) {
+    if (!anchor) return;
+    const snap = { ...anchor };
+    const run = () => applyNotesScrollOnEnter(snap);
+    requestAnimationFrame(() => {
+      run();
+      requestAnimationFrame(() => {
+        run();
+        requestAnimationFrame(run);
+      });
+    });
+  }
+
+  function scheduleNotesScrollOnExit(anchor) {
+    if (!anchor) return;
+    const snap = { ...anchor };
+    requestAnimationFrame(() => {
+      applyNotesScrollOnExit(snap);
+      requestAnimationFrame(() => applyNotesScrollOnExit(snap));
+    });
+  }
+
+  function enterNotesEdit(ev) {
+    const ta = document.getElementById('f-notes');
+    const preview = document.getElementById('f-notes-preview');
+    const wrap = preview?.closest('.kuiper-notes-wrap');
+    if (ev && preview && ta && wrap && ev.clientX != null) {
+      const sourceOffset = sourceOffsetFromPoint(preview, ev.clientX, ev.clientY);
+      pendingScrollAnchor = {
+        sourceOffset,
+        scrollTop: wrap.scrollTop,
+        clickContentY: captureClickContentY(wrap, preview, ev.clientX, ev.clientY),
+      };
+      pendingNotesCaret = sourceOffset;
+    } else {
+      pendingScrollAnchor = null;
+      pendingNotesCaret = null;
+    }
+    notesEditing = true;
+    syncNotesView(true);
+  }
+
   function syncNotesView(focus = false) {
     const ta = document.getElementById('f-notes');
     const preview = document.getElementById('f-notes-preview');
     if (!ta || !preview) return;
+    ta.classList.toggle('is-inactive', !notesEditing);
+    preview.classList.toggle('is-inactive', notesEditing);
+    ta.setAttribute('aria-hidden', String(!notesEditing));
+    preview.setAttribute('aria-hidden', String(notesEditing));
     if (notesEditing) {
-      ta.hidden = false;
-      preview.hidden = true;
-      if (focus) requestAnimationFrame(() => ta.focus());
+      if (!focus) scheduleNotesLayout(pendingScrollAnchor?.scrollTop);
+      if (focus) {
+        const anchor = pendingScrollAnchor;
+        const pos = pendingNotesCaret != null
+          ? Math.max(0, Math.min(pendingNotesCaret, ta.value.length))
+          : ta.value.length;
+        pendingScrollAnchor = null;
+        pendingNotesCaret = null;
+        requestAnimationFrame(() => {
+          ta.focus();
+          if (anchor) scheduleNotesScrollOnEnter({ ...anchor, sourceOffset: pos });
+          else {
+            ta.setSelectionRange(pos, pos);
+            scheduleNotesLayout(notesWrap()?.scrollTop);
+          }
+        });
+      }
       return;
     }
-    ta.hidden = true;
-    preview.hidden = false;
+    const exitAnchor = notesScrollAnchor;
+    notesScrollAnchor = null;
     const raw = ta.value.trim();
     if (!raw) {
       preview.innerHTML = `<p class="md-empty">${esc(tr('notesEmpty'))}</p>`;
       preview.classList.add('empty');
       preview.title = tr('editNotes');
+      scheduleNotesLayout(exitAnchor?.scrollTop);
+      if (exitAnchor) scheduleNotesScrollOnExit(exitAnchor);
       return;
     }
     preview.classList.remove('empty');
     preview.innerHTML = renderMarkdown(raw);
     preview.title = tr('editNotes');
+    scheduleNotesLayout(exitAnchor?.scrollTop);
+    if (exitAnchor) scheduleNotesScrollOnExit(exitAnchor);
   }
 
   function ensureEditorLayout() {
@@ -1385,13 +1744,15 @@ const KuiperUI = (() => {
     if (projectField) projectField.hidden = true;
     if (epicField) epicField.hidden = true;
     if (priField) priField.hidden = true;
+    const sessionField = document.querySelector('#f-session')?.closest('.field');
+    if (sessionField) sessionField.hidden = true;
 
     const grid = document.createElement('div');
     grid.className = 'kuiper-editor-grid';
     const main = document.createElement('div');
-    main.className = 'kuiper-editor-main';
+    main.className = 'kuiper-editor-main scroll-quiet';
     const aside = document.createElement('aside');
-    aside.className = 'kuiper-editor-aside';
+    aside.className = 'kuiper-editor-aside scroll-quiet';
     aside.id = 'kuiperEditorAside';
     aside.innerHTML = `
       ${editorSelectMarkup('kuiperEdProjectCtrl', 'project')}
@@ -1406,19 +1767,24 @@ const KuiperUI = (() => {
     const fNotes = document.getElementById('f-notes');
     if (fNotes) {
       const wrap = document.createElement('div');
-      wrap.className = 'kuiper-notes-wrap';
+      wrap.className = 'kuiper-notes-wrap kuiper-scroll';
+      const stack = document.createElement('div');
+      stack.className = 'kuiper-notes-stack';
       const preview = document.createElement('div');
       preview.id = 'f-notes-preview';
       preview.className = 'kuiper-notes-preview';
       preview.tabIndex = 0;
       fNotes.parentNode.insertBefore(wrap, fNotes);
-      wrap.append(preview, fNotes);
-      preview.addEventListener('click', () => { notesEditing = true; syncNotesView(true); });
+      wrap.append(stack);
+      stack.append(preview, fNotes);
+      fNotes.addEventListener('input', () => { if (notesEditing) fitNotesTextarea(); });
+      preview.addEventListener('click', ev => enterNotesEdit(ev));
       preview.addEventListener('keydown', e => {
-        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); notesEditing = true; syncNotesView(true); }
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); enterNotesEdit(e); }
       });
       fNotes.addEventListener('blur', () => {
         if (!notesEditing) return;
+        notesScrollAnchor = captureAnchorFromTextarea();
         notesEditing = false;
         syncNotesView();
       });
@@ -1584,12 +1950,17 @@ const KuiperUI = (() => {
     syncCardUrl(editingId);
     renderEditorFields(draft);
     syncNotesView(notesEditing);
+    scheduleNotesLayout(0);
     asideI18n();
   }
 
   function onEditorClose() {
     editorEditingId = null;
     notesEditing = false;
+    pendingNotesCaret = null;
+    pendingScrollAnchor = null;
+    notesScrollAnchor = null;
+    resetNotesScrollLayout();
     syncEditorCardId(null);
     syncCardUrl(null);
     closeEditorMenu();
@@ -1598,7 +1969,10 @@ const KuiperUI = (() => {
   }
 
   function flushEditor() {
-    if (notesEditing) notesEditing = false;
+    if (notesEditing) {
+      notesScrollAnchor = captureAnchorFromTextarea();
+      notesEditing = false;
+    }
     syncNotesView();
   }
 

@@ -1527,7 +1527,7 @@ function cardEl(t) {
     <h3>${esc(t.title)}</h3>
     ${t.notes ? `<p class="note">${esc(t.notes)}</p>` : ''}
     ${metaBlock}
-    ${t.session ? `<button class="chip" title="Copy session command">
+    ${!kuiper && t.session ? `<button class="chip" title="Copy session command">
         <span class="caret">&#9656;</span>
         <span class="cmd">${esc(t.session)}</span>
         <span class="ci">${ICON.copy}</span>

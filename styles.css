@@ -2667,6 +2667,9 @@ html[data-kuiper="1"] .board:not(.kuiper-swimlanes) > .col:not(.ghost-col) {
   background: var(--raise);
   transition: border-color .16s, background .16s;
 }
+.kuiper-notes-wrap:not(:focus-within):hover {
+  border-color: var(--line-hi);
+}
 .kuiper-notes-wrap:focus-within {
   border-color: var(--line-hi);
   background: var(--bg);
@@ -3674,9 +3677,136 @@ html[data-kuiper="1"] .board:not(.kuiper-swimlanes) > .col:not(.ghost-col) {
 .kuiper-comment-body { font-size: 12px; }
 .kuiper-time-log-head {
   display: flex;
-  align-items: baseline;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 8px;
+}
+.kuiper-time-log-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.kuiper-time-log-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+}
+.kuiper-time-log-act {
+  opacity: 0;
+  flex: none;
+  color: var(--faint);
+}
+.kuiper-time-log-act svg {
+  width: 13px;
+  height: 13px;
+  display: block;
+}
+.kuiper-time-log-item:not(.is-editing):hover .kuiper-time-log-act,
+.kuiper-time-log-item:not(.is-editing):focus-within .kuiper-time-log-act {
+  opacity: 1;
+}
+.kuiper-time-log-item:not(.is-editing):hover .kuiper-time-log-act-edit:hover,
+.kuiper-time-log-item:not(.is-editing):focus-within .kuiper-time-log-act-edit:hover {
+  color: var(--muted);
+}
+.kuiper-time-log-item:not(.is-editing):hover .kuiper-time-log-act-delete:hover,
+.kuiper-time-log-item:not(.is-editing):focus-within .kuiper-time-log-act-delete:hover {
+  color: var(--danger, #e07070);
+}
+.kuiper-time-log-item.is-editing {
+  padding-top: 6px;
+  padding-bottom: 8px;
+}
+.kuiper-time-log-edit-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr);
+  gap: 10px 12px;
+  align-items: start;
+}
+.kuiper-time-log-view {
+  min-width: 0;
+}
+.kuiper-time-log-item.is-editing .kuiper-time-log-view {
+  padding-right: 4px;
+  border-right: 1px solid var(--line);
+}
+.kuiper-time-log-edit-form {
+  min-width: 0;
+}
+.kuiper-time-log-edit-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 0.82fr) auto;
+  gap: 6px 8px;
+  align-items: stretch;
+}
+.kuiper-time-log-edit-col {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.kuiper-time-log-edit-col-actions {
+  flex: none;
+  justify-content: space-between;
+  width: auto;
+  min-width: 4.5rem;
+}
+.kuiper-time-log-edit-col-actions .ghost.sm,
+.kuiper-time-log-edit-col-actions .primary.sm {
+  width: 100%;
+  justify-content: center;
+}
+.kuiper-time-log-edit-label,
+.kuiper-time-log-edit-date {
+  width: 100%;
+  min-height: 28px;
+  padding: 5px 10px;
+  box-sizing: border-box;
+}
+.kuiper-time-log-edit-date {
+  max-width: none;
+  text-align: left;
+}
+.kuiper-time-log-edit-time {
+  width: 100%;
+  min-width: 0;
+}
+.kuiper-time-log-edit-time .kuiper-dt-input {
+  min-height: 28px;
+  padding: 5px 8px;
+}
+.kuiper-time-log-edit-time .kuiper-dt-picker-btn {
+  width: 28px;
+  min-height: 28px;
+  padding: 0;
+}
+@media (max-width: 520px) {
+  .kuiper-time-log-edit-layout {
+    grid-template-columns: 1fr;
+  }
+  .kuiper-time-log-item.is-editing .kuiper-time-log-view {
+    padding-right: 0;
+    padding-bottom: 8px;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .kuiper-time-log-edit-grid {
+    grid-template-columns: 1fr auto;
+  }
+  .kuiper-time-log-edit-col-meta {
+    grid-column: 1 / -1;
+  }
+  .kuiper-time-log-edit-col-actions {
+    flex-direction: row;
+    min-width: 0;
+    width: auto;
+  }
+  .kuiper-time-log-edit-col-actions .ghost.sm,
+  .kuiper-time-log-edit-col-actions .primary.sm {
+    width: auto;
+  }
 }
 .kuiper-time-log-label { margin: 4px 0 0; font-size: 12px; color: var(--muted); }
 .kuiper-time-log-src { font: 400 10px/1 var(--mono); color: var(--faint); text-transform: uppercase; }

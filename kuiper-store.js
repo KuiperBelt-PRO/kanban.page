@@ -88,6 +88,19 @@ const KuiperStore = (() => {
     });
   }
 
+  async function updateTimeEntry(cardId, entryId, body) {
+    return request(`/api/v1/cards/${encodeURIComponent(cardId)}/time-entries/${encodeURIComponent(entryId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    });
+  }
+
+  async function deleteTimeEntry(cardId, entryId) {
+    return request(`/api/v1/cards/${encodeURIComponent(cardId)}/time-entries/${encodeURIComponent(entryId)}`, {
+      method: 'DELETE',
+    });
+  }
+
   return {
     boardSlug,
     loadBoard,
@@ -102,6 +115,8 @@ const KuiperStore = (() => {
     addTimeEntry,
     stopTimer,
     discardTimer,
+    updateTimeEntry,
+    deleteTimeEntry,
   };
 })();
 

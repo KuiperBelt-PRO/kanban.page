@@ -144,6 +144,53 @@ function discardTimer(db, cardId, entryId) {
   });
 }
 
+function getForCard(db, cardId, entryId) {
+  const row = db.prepare('SELECT * FROM time_entries WHERE id = ? AND card_id = ?').get(entryId, cardId);
+  if (!row) throw new Error('time entry not found');
+  return row;
+}
+
+function update(db, cardId, entryId, fields) {
+  const row = getForCard(db, cardId, entryId);
+  if (!row.ended_at) throw new Error('cannot edit active timer');
+  const card = db.prepare('SELECT board_id FROM cards WHERE id = ?').get(cardId);
+  if (!card) throw new Error('card not found');
+
+  const start = fields.started_at != null ? fields.started_at : row.started_at;
+  const end = fields.ended_at != null ? fields.ended_at : row.ended_at;
+  const label = fields.label !== undefined ? (fields.label || null) : row.label;
+  const startMs = Date.parse(start);
+  const endMs = Date.parse(end);
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) throw new Error('invalid datetime');
+  if (endMs <= startMs) throw new Error('end must be after start');
+  const mins = Math.max(1, Math.round((endMs - startMs) / 60000));
+
+  db.prepare(`
+    UPDATE time_entries SET started_at = ?, ended_at = ?, duration_minutes = ?, label = ? WHERE id = ?
+  `).run(start, end, mins, label, entryId);
+  events.insert(db, {
+    card_id: cardId,
+    board_id: card.board_id,
+    event_type: 'time_updated',
+    payload: { entry_id: entryId, duration_minutes: mins, label },
+  });
+  return rowToEntry(db.prepare('SELECT * FROM time_entries WHERE id = ?').get(entryId));
+}
+
+function remove(db, cardId, entryId) {
+  const row = getForCard(db, cardId, entryId);
+  if (!row.ended_at && row.source === 'timer') throw new Error('use discard for active timer');
+  const card = db.prepare('SELECT board_id FROM cards WHERE id = ?').get(cardId);
+  if (!card) throw new Error('card not found');
+  db.prepare('DELETE FROM time_entries WHERE id = ?').run(entryId);
+  events.insert(db, {
+    card_id: cardId,
+    board_id: card.board_id,
+    event_type: 'time_removed',
+    payload: { entry_id: entryId, duration_minutes: row.duration_minutes || 0 },
+  });
+}
+
 function mapTotalsForBoard(db, boardId) {
   const rows = db.prepare(`
     SELECT card_id, COALESCE(SUM(duration_minutes), 0) AS total
@@ -172,5 +219,7 @@ module.exports = {
   startTimer,
   stopTimer,
   discardTimer,
+  update,
+  remove,
   mapTotalsForBoard,
 };

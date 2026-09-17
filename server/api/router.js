@@ -207,6 +207,37 @@ async function handleApi(req, res, db, urlPath, method) {
     }
   }
 
+  const cardTimeEntryMatch = urlPath.match(/^\/api\/v1\/cards\/([^/]+)\/time-entries\/([^/]+)$/);
+  if (cardTimeEntryMatch && method === 'PATCH') {
+    try {
+      const cardId = decodeURIComponent(cardTimeEntryMatch[1]);
+      const entryId = decodeURIComponent(cardTimeEntryMatch[2]);
+      const body = await readBody(req);
+      const entry = timeEntries.update(db, cardId, entryId, {
+        started_at: body.started_at,
+        ended_at: body.ended_at,
+        label: body.label,
+      });
+      const card = cards.getById(db, cardId);
+      boards.bumpVersion(db, card.board_id);
+      return sendJson(res, 200, { ok: true, data: { entry } });
+    } catch (err) {
+      return badRequest(res, err.message);
+    }
+  }
+  if (cardTimeEntryMatch && method === 'DELETE') {
+    try {
+      const cardId = decodeURIComponent(cardTimeEntryMatch[1]);
+      const entryId = decodeURIComponent(cardTimeEntryMatch[2]);
+      timeEntries.remove(db, cardId, entryId);
+      const card = cards.getById(db, cardId);
+      boards.bumpVersion(db, card.board_id);
+      return sendJson(res, 200, { ok: true, data: { removed: true } });
+    } catch (err) {
+      return badRequest(res, err.message);
+    }
+  }
+
   const cardMatch = urlPath.match(/^\/api\/v1\/cards\/([^/]+)$/);
   if (cardMatch && method === 'PATCH') {
     try {

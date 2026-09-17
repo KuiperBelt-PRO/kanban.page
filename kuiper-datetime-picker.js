@@ -151,10 +151,11 @@ const KuiperDateTimePicker = (() => {
     }
   }
 
-  function positionPop(anchor) {
+  function positionPop(anchor, { clientX, clientY } = {}) {
     const pop = layer.querySelector('.kuiper-picker-pop');
     if (!pop || !anchor) return;
-    const margin = 4;
+    const margin = 8;
+    const gap = 6;
     const rect = anchor.getBoundingClientRect();
     const maxW = Math.min(280, window.innerWidth - margin * 2);
     pop.style.width = `${maxW}px`;
@@ -163,14 +164,22 @@ const KuiperDateTimePicker = (() => {
     pop.style.visibility = 'hidden';
     const popH = pop.offsetHeight;
     const popW = pop.offsetWidth;
-    let left = rect.left;
+    const anchorX = Number.isFinite(clientX) ? clientX : (rect.left + rect.width / 2);
+    const anchorY = Number.isFinite(clientY) ? clientY : (rect.top + rect.height / 2);
+    let left = anchorX - (popW / 2);
     if (left + popW > window.innerWidth - margin) {
       left = window.innerWidth - popW - margin;
     }
     if (left < margin) left = margin;
-    let top = rect.bottom + margin;
+    let top = rect.bottom + gap;
+    if (Number.isFinite(clientY) && clientY > rect.bottom - 2) {
+      top = clientY + gap;
+    }
     if (top + popH > window.innerHeight - margin) {
-      top = rect.top - popH - margin;
+      top = rect.top - popH - gap;
+      if (Number.isFinite(clientY) && clientY < rect.top + 2) {
+        top = clientY - popH - gap;
+      }
     }
     if (top < margin) top = Math.max(margin, window.innerHeight - popH - margin);
     pop.style.left = `${Math.round(left)}px`;
@@ -178,11 +187,11 @@ const KuiperDateTimePicker = (() => {
     pop.style.visibility = '';
   }
 
-  function repositionPop(anchor) {
-    requestAnimationFrame(() => positionPop(anchor));
+  function repositionPop(anchor, point = {}) {
+    requestAnimationFrame(() => positionPop(anchor, point));
   }
 
-  function openDate({ anchor, value, onPick }) {
+  function openDate({ anchor, value, onPick, clientX, clientY }) {
     ensureLayer();
     if (!layer.hidden) close();
     const body = layer.querySelector('.kuiper-picker-body');
@@ -248,11 +257,11 @@ const KuiperDateTimePicker = (() => {
     layer.hidden = false;
     pop?.classList.remove('is-time');
     render();
-    repositionPop(anchor);
+    repositionPop(anchor, { clientX, clientY });
     onClose = () => {};
   }
 
-  function openTime({ anchor, value, onPick, labelKey }) {
+  function openTime({ anchor, value, onPick, labelKey, clientX, clientY }) {
     ensureLayer();
     if (!layer.hidden) close();
     const body = layer.querySelector('.kuiper-picker-body');
@@ -314,7 +323,7 @@ const KuiperDateTimePicker = (() => {
 
     layer.hidden = false;
     render();
-    repositionPop(anchor);
+    repositionPop(anchor, { clientX, clientY });
     onClose = () => {};
   }
 
@@ -360,9 +369,11 @@ const KuiperDateTimePicker = (() => {
     if (!hidden || !trigger || trigger.dataset.pickerWired) return;
     trigger.dataset.pickerWired = '1';
     hidden.dataset.kind = 'date';
-    trigger.addEventListener('click', () => {
+    trigger.addEventListener('click', e => {
       openDate({
         anchor: trigger,
+        clientX: e.clientX,
+        clientY: e.clientY,
         value: hidden.value || todayYmd(),
         onPick: v => {
           hidden.value = v;
@@ -390,10 +401,12 @@ const KuiperDateTimePicker = (() => {
       }
     });
 
-    pickerBtn.addEventListener('click', () => {
+    pickerBtn.addEventListener('click', e => {
       const current = normalizeTimeInput(input.value) || input.dataset.lastValid || '09:00';
       openTime({
-        anchor: input.closest('.kuiper-dt-combo') || input,
+        anchor: pickerBtn,
+        clientX: e.clientX,
+        clientY: e.clientY,
         labelKey,
         value: current,
         onPick: v => {
@@ -503,10 +516,34 @@ const KuiperDateTimePicker = (() => {
     upgradeManualDom();
   }
 
+  function mountTimeEntryEdit(entryId) {
+    const id = String(entryId || '').replace(/[^\w-]/g, '');
+    if (!id) return;
+    wireDateField({ hiddenId: `kuiperTimeEditDate-${id}`, triggerId: `kuiperTimeEditDateBtn-${id}` });
+    wireTimeField({
+      inputId: `kuiperTimeEditStart-${id}`,
+      triggerId: `kuiperTimeEditStartBtn-${id}`,
+      labelKey: 'timeManualStart',
+    });
+    wireTimeField({
+      inputId: `kuiperTimeEditEnd-${id}`,
+      triggerId: `kuiperTimeEditEndBtn-${id}`,
+      labelKey: 'timeManualEnd',
+    });
+    const dateHidden = document.getElementById(`kuiperTimeEditDate-${id}`);
+    const dateTrigger = document.getElementById(`kuiperTimeEditDateBtn-${id}`);
+    if (dateHidden && dateTrigger) syncTrigger(dateHidden, dateTrigger);
+    [`kuiperTimeEditStart-${id}`, `kuiperTimeEditEnd-${id}`].forEach(fieldId => {
+      const input = document.getElementById(fieldId);
+      if (input) syncTimeInput(input);
+    });
+  }
+
   return {
     init,
     close,
     mountManualFields,
+    mountTimeEntryEdit,
     upgradeManualDom,
     setDefaults,
     formatDateDisplay,
@@ -515,6 +552,8 @@ const KuiperDateTimePicker = (() => {
     addMinutesToHm,
     nowHm,
     todayYmd,
+    wireDateField,
+    wireTimeField,
   };
 })();
 

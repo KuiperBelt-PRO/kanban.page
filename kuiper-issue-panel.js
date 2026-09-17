@@ -13,8 +13,11 @@ const KuiperIssuePanel = (() => {
   let timeMode = 'timer';
   let linkedOpen = true;
   let editingCommentId = null;
+  let editingTimeEntryId = null;
 
   const DISCARD_ICON = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 4.5h11M6 4.5V3.25A.75.75 0 0 1 6.75 2.5h2.5a.75.75 0 0 1 .75.75V4.5m-5.5 0v8.25a1 1 0 0 0 1 1h6.5a1 1 0 0 0 1-1V4.5H4.5z"/><path d="M6.75 7.25v4.25M9.25 7.25v4.25"/></svg>';
+  const EDIT_ICON = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11.25 2.75 13.25 4.75 5.5 12.5 3.25 12.75 3.5 10.5 11.25 2.75z"/><path d="M10 4 12 6"/></svg>';
+  const TIME_CLOCK_ICON = '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M8 5v3.5l2 1.2" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>';
 
   function tr(key, vars) {
     return ctx.tr?.(key, vars) || key;
@@ -310,6 +313,7 @@ const KuiperIssuePanel = (() => {
     document.getElementById('kuiperCommentForm')?.addEventListener('submit', submitComment);
     document.getElementById('kuiperCommentList')?.addEventListener('click', onCommentListClick);
     document.getElementById('kuiperCommentList')?.addEventListener('keydown', onCommentEditKeydown);
+    document.getElementById('kuiperTimeLogList')?.addEventListener('click', onTimeLogListClick);
     document.getElementById('kuiperLinkedToggle')?.addEventListener('click', () => {
       linkedOpen = !linkedOpen;
       document.getElementById('kuiperLinkedBody')?.toggleAttribute('hidden', !linkedOpen);
@@ -604,6 +608,104 @@ const KuiperIssuePanel = (() => {
       const item = e.target.closest('[data-comment-id]');
       const commentId = item?.dataset.commentId;
       if (commentId) saveCommentEdit(commentId, item);
+    }
+  }
+
+  function timeEntryDomSuffix(entryId) {
+    return String(entryId || '').replace(/[^\w-]/g, '');
+  }
+
+  function isoToLocalHm(iso) {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '';
+    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  }
+
+  function mountTimeEntryEditFields(entryId) {
+    if (typeof KuiperDateTimePicker === 'undefined') return;
+    KuiperDateTimePicker.mountTimeEntryEdit(entryId);
+  }
+
+  function readTimeEntryEditValues(entryId) {
+    const sid = timeEntryDomSuffix(entryId);
+    const date = document.getElementById(`kuiperTimeEditDate-${sid}`)?.value;
+    const startEl = document.getElementById(`kuiperTimeEditStart-${sid}`);
+    const endEl = document.getElementById(`kuiperTimeEditEnd-${sid}`);
+    startEl?.blur();
+    endEl?.blur();
+    const norm = v => (KuiperDateTimePicker?.normalizeTimeInput?.(v) || v || '').trim();
+    const startTime = norm(startEl?.value);
+    const endTime = norm(endEl?.value);
+    const label = document.getElementById(`kuiperTimeEditLabel-${sid}`)?.value?.trim() || '';
+    return { date, startTime, endTime, label };
+  }
+
+  function timeEntryEditIsoRange(entryId) {
+    const { date, startTime, endTime, label } = readTimeEntryEditValues(entryId);
+    if (!date || !startTime || !endTime) return null;
+    const started_at = new Date(`${date}T${startTime}:00`);
+    let ended_at = new Date(`${date}T${endTime}:00`);
+    if (Number.isNaN(started_at.getTime()) || Number.isNaN(ended_at.getTime())) return null;
+    if (ended_at <= started_at) ended_at.setDate(ended_at.getDate() + 1);
+    return { started_at: started_at.toISOString(), ended_at: ended_at.toISOString(), label };
+  }
+
+  function onTimeLogListClick(e) {
+    const btn = e.target.closest('[data-time-act]');
+    if (!btn) return;
+    const item = btn.closest('[data-time-entry-id]');
+    const entryId = item?.dataset.timeEntryId;
+    if (!entryId) return;
+    if (btn.dataset.timeAct === 'edit') {
+      editingTimeEntryId = entryId;
+      renderTimeLog();
+      mountTimeEntryEditFields(entryId);
+      document.getElementById(`kuiperTimeEditStart-${timeEntryDomSuffix(entryId)}`)?.focus();
+      return;
+    }
+    if (btn.dataset.timeAct === 'cancel') {
+      editingTimeEntryId = null;
+      renderTimeLog();
+      return;
+    }
+    if (btn.dataset.timeAct === 'save') {
+      e.preventDefault();
+      saveTimeEntryEdit(entryId, item);
+      return;
+    }
+    if (btn.dataset.timeAct === 'delete') {
+      e.preventDefault();
+      deleteTimeEntry(entryId);
+    }
+  }
+
+  async function saveTimeEntryEdit(entryId, itemEl) {
+    const item = itemEl || document.querySelector(`#kuiperTimeLogList [data-time-entry-id="${CSS.escape(entryId)}"]`);
+    const saveBtn = item?.querySelector('[data-time-act="save"]');
+    const payload = timeEntryEditIsoRange(entryId);
+    if (!payload) return;
+    if (saveBtn) saveBtn.disabled = true;
+    try {
+      await KuiperStore.updateTimeEntry(currentCardId, entryId, payload);
+      editingTimeEntryId = null;
+      await reloadDetail();
+      ctx.refreshBoard?.();
+    } catch (err) {
+      console.warn('time entry update failed', err);
+      ctx.toast?.(tr('timeEntrySaveFailed'));
+      if (saveBtn) saveBtn.disabled = false;
+    }
+  }
+
+  async function deleteTimeEntry(entryId) {
+    try {
+      await KuiperStore.deleteTimeEntry(currentCardId, entryId);
+      if (String(editingTimeEntryId) === String(entryId)) editingTimeEntryId = null;
+      await reloadDetail();
+      ctx.refreshBoard?.();
+    } catch (err) {
+      console.warn('time entry delete failed', err);
+      ctx.toast?.(tr('timeEntryDeleteFailed'));
     }
   }
 
@@ -1008,6 +1110,85 @@ const KuiperIssuePanel = (() => {
     setTimeMode(timeMode);
   }
 
+  function renderTimeLogView(entry, { actions = true } = {}) {
+    const actionsHtml = actions ? `
+          <div class="kuiper-time-log-actions">
+            <button type="button" class="icon sm kuiper-time-log-act kuiper-time-log-act-edit" data-time-act="edit" title="${esc(tr('editComment'))}" aria-label="${esc(tr('editComment'))}">${EDIT_ICON}</button>
+            <button type="button" class="icon sm kuiper-time-log-act kuiper-time-log-act-delete" data-time-act="delete" title="${esc(tr('deleteTimeEntry'))}" aria-label="${esc(tr('deleteTimeEntry'))}">${DISCARD_ICON}</button>
+          </div>` : '';
+    return `
+      <div class="kuiper-time-log-view">
+        <div class="kuiper-time-log-head">
+          <div class="kuiper-time-log-meta">
+            <strong>${esc(formatMinutes(entry.duration_minutes))}</strong>
+            <span class="kuiper-time-log-when">${esc(formatTimeRange(entry.started_at, entry.ended_at))}</span>
+          </div>
+          ${actionsHtml}
+        </div>
+        ${entry.label ? `<p class="kuiper-time-log-label">${esc(entry.label)}</p>` : ''}
+        <span class="kuiper-time-log-src">${esc(entry.source === 'timer' ? tr('sourceTimer') : tr('sourceManual'))}</span>
+      </div>`;
+  }
+
+  function renderTimeLogEditForm(entry) {
+    const sid = timeEntryDomSuffix(entry.id);
+    const dateVal = entry.started_at ? localYmd(new Date(entry.started_at)) : localYmd();
+    const startVal = isoToLocalHm(entry.started_at) || '09:00';
+    const endVal = isoToLocalHm(entry.ended_at) || '10:00';
+    const dateDisplay = KuiperDateTimePicker?.formatDateDisplay?.(dateVal) || dateVal;
+    return `
+      <div class="kuiper-time-log-edit-form">
+        <div class="kuiper-time-log-edit-grid">
+          <div class="kuiper-time-log-edit-col kuiper-time-log-edit-col-meta">
+            <input type="text" class="kuiper-time-field kuiper-time-log-edit-label" id="kuiperTimeEditLabel-${sid}" placeholder="${esc(tr('timeLabelOptional'))}" value="${esc(entry.label || '')}">
+            <button type="button" class="kuiper-dt-trigger kuiper-time-log-edit-date" id="kuiperTimeEditDateBtn-${sid}" aria-label="${esc(tr('timeManualDate'))}" data-placeholder="—"><span class="kuiper-dt-trigger-val">${esc(dateDisplay)}</span></button>
+            <input type="hidden" id="kuiperTimeEditDate-${sid}" value="${esc(dateVal)}">
+          </div>
+          <div class="kuiper-time-log-edit-col kuiper-time-log-edit-col-times">
+            <div class="kuiper-dt-combo kuiper-time-log-edit-time">
+              <input type="text" class="kuiper-dt-input" id="kuiperTimeEditStart-${sid}" inputmode="numeric" autocomplete="off" spellcheck="false" placeholder="09:00" value="${esc(startVal)}" aria-label="${esc(tr('timeManualStart'))}">
+              <button type="button" class="icon sm kuiper-dt-picker-btn" id="kuiperTimeEditStartBtn-${sid}" aria-label="${esc(tr('timeManualStart'))}">${TIME_CLOCK_ICON}</button>
+            </div>
+            <div class="kuiper-dt-combo kuiper-time-log-edit-time">
+              <input type="text" class="kuiper-dt-input" id="kuiperTimeEditEnd-${sid}" inputmode="numeric" autocomplete="off" spellcheck="false" placeholder="10:00" value="${esc(endVal)}" aria-label="${esc(tr('timeManualEnd'))}">
+              <button type="button" class="icon sm kuiper-dt-picker-btn" id="kuiperTimeEditEndBtn-${sid}" aria-label="${esc(tr('timeManualEnd'))}">${TIME_CLOCK_ICON}</button>
+            </div>
+          </div>
+          <div class="kuiper-time-log-edit-col kuiper-time-log-edit-col-actions">
+            <button type="button" class="ghost sm" data-time-act="cancel">${esc(tr('cancel'))}</button>
+            <button type="button" class="primary sm" data-time-act="save">${esc(tr('save'))}</button>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  function renderTimeLogItem(entry) {
+    if (!entry.ended_at) {
+      return `
+      <article class="kuiper-time-log-item is-active" data-time-entry-id="${esc(entry.id)}">
+        <div class="kuiper-time-log-head">
+          <strong>${esc(formatMinutes(entry.duration_minutes))}</strong>
+          <span class="kuiper-time-log-when">${esc(formatTimeRange(entry.started_at, entry.ended_at))}</span>
+        </div>
+        ${entry.label ? `<p class="kuiper-time-log-label">${esc(entry.label)}</p>` : ''}
+        <span class="kuiper-time-log-src">${esc(entry.source === 'timer' ? tr('sourceTimer') : tr('sourceManual'))}</span>
+      </article>`;
+    }
+    if (String(editingTimeEntryId) === String(entry.id)) {
+      return `
+      <article class="kuiper-time-log-item is-editing" data-time-entry-id="${esc(entry.id)}">
+        <div class="kuiper-time-log-edit-layout">
+          ${renderTimeLogView(entry, { actions: false })}
+          ${renderTimeLogEditForm(entry)}
+        </div>
+      </article>`;
+    }
+    return `
+      <article class="kuiper-time-log-item" data-time-entry-id="${esc(entry.id)}">
+        ${renderTimeLogView(entry)}
+      </article>`;
+  }
+
   function renderTimeLog() {
     const el = document.getElementById('kuiperTimeLogList');
     if (!el) return;
@@ -1016,15 +1197,8 @@ const KuiperIssuePanel = (() => {
       el.innerHTML = `<p class="kuiper-panel-empty">${esc(tr('noTimeEntries'))}</p>`;
       return;
     }
-    el.innerHTML = entries.map(entry => `
-      <article class="kuiper-time-log-item">
-        <div class="kuiper-time-log-head">
-          <strong>${esc(formatMinutes(entry.duration_minutes))}</strong>
-          <span class="kuiper-time-log-when">${esc(formatTimeRange(entry.started_at, entry.ended_at))}</span>
-        </div>
-        ${entry.label ? `<p class="kuiper-time-log-label">${esc(entry.label)}</p>` : ''}
-        <span class="kuiper-time-log-src">${esc(entry.source === 'timer' ? tr('sourceTimer') : tr('sourceManual'))}</span>
-      </article>`).join('');
+    el.innerHTML = entries.map(renderTimeLogItem).join('');
+    if (editingTimeEntryId) mountTimeEntryEditFields(editingTimeEntryId);
   }
 
   function eventSummary(ev) {
@@ -1046,6 +1220,8 @@ const KuiperIssuePanel = (() => {
       case 'comment_added': return tr('histCommentAdded');
       case 'comment_updated': return tr('histCommentUpdated');
       case 'time_logged': return tr('histTimeLogged', { value: formatMinutes(p.duration_minutes) });
+      case 'time_updated': return tr('histTimeUpdated', { value: formatMinutes(p.duration_minutes) });
+      case 'time_removed': return tr('histTimeRemoved', { value: formatMinutes(p.duration_minutes) });
       case 'timer_started': return tr('histTimerStarted');
       case 'timer_stopped': return tr('histTimerStopped', { value: formatMinutes(p.duration_minutes) });
       case 'timer_discarded': return tr('histTimerDiscarded');
@@ -1070,8 +1246,6 @@ const KuiperIssuePanel = (() => {
       </article>`).join('');
   }
 
-  const COMMENT_EDIT_ICON = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11.25 2.75 13.25 4.75 5.5 12.5 3.25 12.75 3.5 10.5 11.25 2.75z"/><path d="M10 4 12 6"/></svg>';
-
   function renderCommentItem(c) {
     if (String(editingCommentId) === String(c.id)) {
       return `
@@ -1090,7 +1264,7 @@ const KuiperIssuePanel = (() => {
       <article class="kuiper-comment-item" data-comment-id="${esc(c.id)}">
         <div class="kuiper-comment-head">
           <time>${esc(formatWhen(c.created_at))}</time>
-          <button type="button" class="icon sm kuiper-comment-edit" data-comment-act="edit" title="${esc(tr('editComment'))}" aria-label="${esc(tr('editComment'))}">${COMMENT_EDIT_ICON}</button>
+          <button type="button" class="icon sm kuiper-comment-edit" data-comment-act="edit" title="${esc(tr('editComment'))}" aria-label="${esc(tr('editComment'))}">${EDIT_ICON}</button>
         </div>
         <div class="kuiper-md kuiper-comment-body">${renderMd(c.body)}</div>
       </article>`;
@@ -1148,6 +1322,7 @@ const KuiperIssuePanel = (() => {
   async function onEditorOpen(cardId, draft) {
     ensureLayout();
     editingCommentId = null;
+    editingTimeEntryId = null;
     currentCardId = cardId;
     if (cardId === 'new') {
       detail = {
@@ -1176,6 +1351,7 @@ const KuiperIssuePanel = (() => {
 
   function onEditorClose() {
     editingCommentId = null;
+    editingTimeEntryId = null;
     currentCardId = null;
     detail = null;
     stopTimerTick();

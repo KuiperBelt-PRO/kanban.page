@@ -144,6 +144,26 @@ describe('api', () => {
     assert.equal(manual.body.data.entry.duration_minutes, 90);
     assert.ok(manual.body.data.entry.started_at);
     assert.ok(manual.body.data.entry.ended_at);
+    const entryId = manual.body.data.entry.id;
+
+    const timeUpdated = await request('PATCH', `/api/v1/cards/${encodeURIComponent(cardId)}/time-entries/${encodeURIComponent(entryId)}`, {
+      started_at: '2026-03-10T08:00:00.000Z',
+      ended_at: '2026-03-10T09:00:00.000Z',
+      label: 'review updated',
+    });
+    assert.equal(timeUpdated.status, 200);
+    assert.equal(timeUpdated.body.data.entry.duration_minutes, 60);
+    assert.equal(timeUpdated.body.data.entry.label, 'review updated');
+
+    const timeDeleted = await request('DELETE', `/api/v1/cards/${encodeURIComponent(cardId)}/time-entries/${encodeURIComponent(entryId)}`);
+    assert.equal(timeDeleted.status, 200);
+    assert.equal(timeDeleted.body.data.removed, true);
+
+    const manualKeep = await request('POST', `/api/v1/cards/${encodeURIComponent(cardId)}/time-entries`, {
+      duration_minutes: 15,
+      label: 'kept',
+    });
+    assert.equal(manualKeep.status, 201);
 
     if (otherId !== cardId) {
       const link = await request('POST', `/api/v1/cards/${encodeURIComponent(cardId)}/links`, {

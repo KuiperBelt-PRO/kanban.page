@@ -1701,17 +1701,17 @@ const KuiperUI = (() => {
     const exitAnchor = notesScrollAnchor;
     notesScrollAnchor = null;
     const raw = ta.value.trim();
+    preview.removeAttribute('title');
+    delete preview.dataset.tip;
     if (!raw) {
       preview.innerHTML = `<p class="md-empty">${esc(tr('notesEmpty'))}</p>`;
       preview.classList.add('empty');
-      preview.title = tr('editNotes');
       scheduleNotesLayout(exitAnchor?.scrollTop);
       if (exitAnchor) scheduleNotesScrollOnExit(exitAnchor);
       return;
     }
     preview.classList.remove('empty');
     preview.innerHTML = renderMarkdown(raw);
-    preview.title = tr('editNotes');
     scheduleNotesLayout(exitAnchor?.scrollTop);
     if (exitAnchor) scheduleNotesScrollOnExit(exitAnchor);
   }

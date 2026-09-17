@@ -139,6 +139,21 @@ async function handleApi(req, res, db, urlPath, method) {
     }
   }
 
+  const cardCommentPatchMatch = urlPath.match(/^\/api\/v1\/cards\/([^/]+)\/comments\/([^/]+)$/);
+  if (cardCommentPatchMatch && method === 'PATCH') {
+    try {
+      const cardId = decodeURIComponent(cardCommentPatchMatch[1]);
+      const commentId = decodeURIComponent(cardCommentPatchMatch[2]);
+      const body = await readBody(req);
+      const comment = comments.update(db, cardId, commentId, body.body);
+      const card = cards.getById(db, cardId);
+      boards.bumpVersion(db, card.board_id);
+      return sendJson(res, 200, { ok: true, data: { comment } });
+    } catch (err) {
+      return badRequest(res, err.message);
+    }
+  }
+
   const cardTimeMatch = urlPath.match(/^\/api\/v1\/cards\/([^/]+)\/time-entries$/);
   if (cardTimeMatch && method === 'POST') {
     try {
@@ -215,7 +230,7 @@ async function handleApi(req, res, db, urlPath, method) {
 const STATIC_ROOT = path.join(__dirname, '..', '..');
 const STATIC_FILES = new Set([
   'index.html', 'app.js', 'core.js', 'i18n.js', 'styles.css',
-  'kuiper-store.js', 'kuiper-datetime-picker.js', 'kuiper-issue-panel.js', 'kuiper-ui.js',
+  'kuiper-store.js', 'kuiper-datetime-picker.js', 'kuiper-issue-panel.js', 'kuiper-ui.js', 'tooltip.js',
   'manifest.webmanifest', 'sw.js', 'qr.js',
 ]);
 

@@ -124,11 +124,13 @@ block-beta
 | Zona | Voz | Detalle |
 | --- | --- | --- |
 | ID + prioridad | mono | Esquina superior; flag se desplaza si hay prioridad |
+| Copiar enlace | mono + icono | `.kuiper-card-id` — solo copia URL; no abre editor |
 | Título | ui | `.card h3` |
 | Notas | ui muted | clamp 2 líneas |
 | Tags (Kuiper) | ui + `--c` | dot proyecto, triángulo épica |
 | Sesión | mono | `.chip`, sweep ámbar 1.2s al copiar |
 | Borde izq. | `--c` | 2px = color de proyecto |
+| Tooltips | ui + `kbd` | `tooltip.js` sustituye `title` nativo |
 
 ---
 
@@ -137,7 +139,9 @@ block-beta
 Large sheet (`min(960px)`, ~90vh): **main** (título, etapas, descripción markdown, enlaces, tabs) + **aside** 248px (proyecto, épica, prioridad, flag, tags, estimación, timer).
 
 - Enlaces estilo Jira bajo descripción, antes de tabs.
-- Tabs: Comentarios | Registro de tiempo | Historial — mismo fondo scroll que notas.
+- Tabs: Comentarios | Registro de tiempo | Historial — botonera `.seg` (igual que etapas).
+- Comentarios: formulario fijo arriba; lista con scroll; edición inline (lápiz → textarea → Save/Cancel); `PATCH` API.
+- Timer en aside: estimación + barra progreso antes de Timer/Manual; registro manual con picker fecha/hora in-app.
 - Footer clásico oculto; acciones en menú `⋯` del header.
 
 Detalle completo: [`DESIGN.md` §11](../DESIGN.md).

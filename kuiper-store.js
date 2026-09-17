@@ -60,6 +60,13 @@ const KuiperStore = (() => {
     });
   }
 
+  async function updateComment(cardId, commentId, body) {
+    return request(`/api/v1/cards/${encodeURIComponent(cardId)}/comments/${encodeURIComponent(commentId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ body }),
+    });
+  }
+
   async function addTimeEntry(cardId, body) {
     return request(`/api/v1/cards/${encodeURIComponent(cardId)}/time-entries`, {
       method: 'POST',
@@ -91,6 +98,7 @@ const KuiperStore = (() => {
     addCardLink,
     removeCardLink,
     addComment,
+    updateComment,
     addTimeEntry,
     stopTimer,
     discardTimer,

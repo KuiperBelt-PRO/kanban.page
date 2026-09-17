@@ -2,7 +2,7 @@
 
 Especificación **completa** del sistema de diseño actual. Toda feature UI nueva debe cumplirla. Si algo no está aquí, no está definido — amplía este documento en el mismo PR.
 
-**Fuente de verdad en código:** `styles.css`, `index.html`, `app.js`, `kuiper-ui.js`, `kuiper-issue-panel.js`.
+**Fuente de verdad en código:** `styles.css`, `index.html`, `app.js`, `kuiper-ui.js`, `kuiper-issue-panel.js`, `kuiper-datetime-picker.js`, `tooltip.js`.
 
 | Documento | Rol |
 | --- | --- |
@@ -41,7 +41,7 @@ flowchart TB
 
 | Voz | Token | Stack | Uso obligatorio |
 | --- | --- | --- | --- |
-| Humana | `--ui` | `"Avenir Next", Avenir, -apple-system, system-ui, sans-serif` | Títulos, notas, copy, botones `.primary`/`.ghost`, tabs issue |
+| Humana | `--ui` | `"Avenir Next", Avenir, -apple-system, system-ui, sans-serif` | Títulos, notas, copy, botones `.primary`/`.ghost` |
 | Máquina | `--mono` | `"SF Mono", ui-monospace, SFMono-Regular, Menlo, monospace` | Etapas, contadores, fechas, IDs `kb…`, sesiones, semanas, labels `.lbl`, meta tarjeta |
 
 **Prohibido:** mono en párrafos o botones CTA salvo patrones existentes (`.seg`, `.wk`, `.chip`, `.cmd-input input`).
@@ -200,7 +200,7 @@ Toggle: menú `T` o prefs Kuiper. Kuiper local default: **dark** si no hay prefe
 | Ruta informe | `.rep-row .rf` | mono | 10.5px 400 | 1 | 0.08em | uppercase |
 | Timer | `.kuiper-time-display` | mono | 22px 600 | 1 | 0.06em | center |
 | ID tarjeta | `.kuiper-card-id` | mono | 10–11px 400 | 1 | 0.02em | — |
-| Tab issue | `.kuiper-issue-tab` | ui | 11px 500 | 1 | 0.04em | uppercase |
+| Tab issue | `.seg.kuiper-issue-tabbar button` | mono | 10.5px 500 | 1 | 0.12em | uppercase; activo `--accent-fill` |
 | Empty | `.kuiper-panel-empty`, `.kuiper-linked-empty` | ui | 11–12px 400 italic | 1.4 | — | — |
 | kbd atajo | `kbd` | mono | 10px 500 | 1 | — | — |
 
@@ -409,7 +409,21 @@ stateDiagram-v2
 - Bottom `24px + safe-area`; max-width `min(calc(100vw - 24px), 420px)`.
 - Botón undo: pill `--raise` → hover `--accent-fill`.
 
-### 7.10 Informe semanal
+### 7.10 Tooltip `.tip-bubble`
+
+Sustituye el `title` nativo del navegador (`tooltip.js`).
+
+| Parte | Clase / comportamiento |
+| --- | --- |
+| Contenedor | `.tip-root` — `position: fixed`, `z-index: 425`, `pointer-events: none` |
+| Burbuja | `.tip-bubble` — `--surface`, borde `--line`, `--sh-2`, ui 12px `--muted` |
+| Atajo | Sufijo ` A` / ` R` / ` F` en `title` → `<kbd>` mono a la derecha |
+| Texto largo | `.tip-bubble.is-wrap` — `max-width: 280px`, multilínea |
+| Migración | Al mostrar, `title` → `data-tip` (evita doble tooltip nativo) |
+
+Delay ~420ms en hover; foco muestra al instante. No usar `title` para copy nuevo sin pasar por este sistema.
+
+### 7.11 Informe semanal
 
 | Parte | Clase | Notas |
 | --- | --- | --- |
@@ -541,6 +555,8 @@ Clases: `.kuiper-pri.p{n}`, `.kuiper-pri-badge`, `.kuiper-pri-pill[aria-pressed=
 
 `DISCARD_ICON` — papelera 16×16 stroke en `kuiper-issue-panel.js`.
 
+`COMMENT_EDIT_ICON` — lápiz 16×16 stroke en botón `.kuiper-comment-edit`.
+
 ### 9.4 Reglas
 
 - `viewBox="0 0 16 16"`.
@@ -559,9 +575,11 @@ Orden en `index.html`:
 flowchart LR
   I18N[i18n.js] --> CORE[core.js]
   CORE --> STORE[kuiper-store.js]
-  STORE --> PANEL[kuiper-issue-panel.js]
+  DTP[kuiper-datetime-picker.js] --> PANEL[kuiper-issue-panel.js]
+  STORE --> PANEL
   PANEL --> UI[kuiper-ui.js]
-  UI --> APP[app.js]
+  TIP[tooltip.js] --> APP[app.js]
+  UI --> APP
   STORE --> API["/api/v1 SQLite"]
   APP --> DOM[index.html + styles.css]
 ```
@@ -574,7 +592,9 @@ Query `?v=kuiper` en scripts. SW upstream se desregistra en Kuiper local.
 | --- | --- |
 | `kuiper-store.js` | HTTP `/api/v1/*` |
 | `kuiper-ui.js` | Sidebar, filtros, swimlanes, tarjetas, layout editor |
-| `kuiper-issue-panel.js` | Tags, links, timer, tabs |
+| `kuiper-issue-panel.js` | Tags, links, timer, tabs, comentarios |
+| `kuiper-datetime-picker.js` | Pickers fecha/hora in-app (manual time) |
+| `tooltip.js` | Tooltips con estilo de la app |
 | `server/api/router.js` | API + `STATIC_FILES` |
 
 ### 10.3 Rail Kuiper
@@ -618,12 +638,14 @@ flowchart TB
 
 | Zona | Clases |
 | --- | --- |
-| ID | `.kuiper-card-id-wrap` > button copiar |
+| ID | `.kuiper-card-id-wrap` > `.kuiper-card-id` (copiar enlace) |
 | Título | `h3` (padding extra si `.has-pri`) |
 | Prioridad | `.kuiper-pri-badge` absolute top-right |
 | Flag | desplazado si prioridad (`right: 34px`) |
 | Pie | `.kuiper-card-foot` > `.kuiper-card-tags` + `.age` |
 | Tag fila | `.kuiper-tag.proj` / `.epic` / `.label` — grid 52px + 1fr |
+
+**Copiar enlace:** click en `.kuiper-card-id` copia URL de la tarjeta (`?card=…`) y **no** abre el editor. En `app.js`, `pointerdown` en la tarjeta excluye `.chip`, `.flag` y `.kuiper-card-id` (igual que el flag).
 
 ### 10.7 Dropdowns `.kuiper-ctrl`
 
@@ -705,17 +727,26 @@ UI: grupos separados; fila abre editor de la otra card; remove en hover.
 
 ### 11.6 Timer `.kuiper-time-tracker`
 
+Bloque en aside, dentro de `.kuiper-aside-group`, con separadores temáticos respecto a tags y al resto del aside.
+
+| Zona | IDs / clases |
+| --- | --- |
+| Estimación | `#kuiperEdEstimateField` — antes del resumen y la barra de progreso |
+| Resumen | `#kuiperTimeSummary` |
+| Progreso | `#kuiperTimeProgress` — verde `#7FD1AE` (`.kuiper-time-progress-green`); exceso `--danger` (`.kuiper-time-progress-red`) |
+| Modo | `.seg.kuiper-time-modebar` — Timer / Manual (`aria-pressed`) |
+
 | Estado | UI |
 | --- | --- |
-| Idle | `#kuiperTimeIdle` — display muted, botón `.primary.kuiper-time-start` |
-| Running | `#kuiperTimeRunning` — display activo, `.kuiper-time-actions` |
-| Label | `#kuiperTimerLabel` **siempre visible** (fuera de idle/running toggle) |
+| Idle | `#kuiperTimeIdle` — reloj muted en `.seg`, botón `.primary.kuiper-time-start` |
+| Running | `#kuiperTimeRunning` — reloj activo, `.kuiper-time-actions` |
+| Label timer | `#kuiperTimerLabel` en pane timer |
 
 **Parar:** `.kuiper-time-stop` — sólido danger, texto blanco.
 
 **Descartar:** `.kuiper-time-discard` — dashed danger, icono papelera, pulso 2.6s; grid `1.12fr 1fr` con stop.
 
-**Manual:** `#kuiperManualHours` + `#kuiperManualMins` + `.kuiper-time-add`.
+**Manual:** fecha (`#kuiperManualDateBtn` + picker), inicio/fin en `.kuiper-dt-combo` (input editable + botón reloj → `KuiperDateTimePicker`), label `#kuiperManualLabel`, botón `#kuiperManualAdd`. Formato 24h; scroll en columnas hora del picker con `.kuiper-scroll`.
 
 ```mermaid
 stateDiagram-v2
@@ -735,19 +766,33 @@ stateDiagram-v2
 
 ### 11.7 Tabs
 
+Selector: `.seg.kuiper-issue-tabbar` — misma botonera compuesta que etapas (§7.7): fondo `--raise`, pill activa `--accent-fill` / `--accent-ink`, mono uppercase, tres botones `flex: 1`. Estado con `aria-pressed`.
+
 | Tab `data-tab` | Panel | Contenido |
 | --- | --- | --- |
-| `comments` | `#kuiperCommentList` | form + lista |
+| `comments` | `#kuiperCommentList` | formulario fijo + lista con scroll |
 | `time` | `#kuiperTimeLogList` | entradas manual/timer |
 | `history` | `#kuiperHistoryList` | eventos (ver §11.8) |
 
-Scroll: `.kuiper-issue-scroll.kuiper-scroll` — padding `11px 12px`, fondo `--raise`, focus `--bg`.
+**Comentarios** (`.kuiper-comments-shell`):
+
+| Zona | Clase | Scroll |
+| --- | --- | --- |
+| Formulario nuevo | `#kuiperCommentForm` | fijo arriba |
+| Lista | `.kuiper-comment-list-scroll.kuiper-scroll` | solo comentarios existentes |
+| Item | `.kuiper-comment-item` | — |
+| Editar | icono lápiz `.kuiper-comment-edit` (hover); modo `.is-editing` con textarea + Cancel/Save |
+| Atajos edición | `Ctrl+Enter` guardar, `Escape` cancelar |
+
+Textareas de comentario: `resize: vertical`; tirador `::-webkit-resizer` con líneas diagonales `--faint` (no grip nativo del SO). API: `PATCH /api/v1/cards/:id/comments/:commentId`. Error de guardado → toast `commentSaveFailed`.
+
+**Time / History:** `.kuiper-issue-scroll.kuiper-scroll` — padding `11px 12px`, fondo `--raise`.
 
 ### 11.8 Historial (tipos de evento)
 
 Claves i18n en `kuiper-issue-panel.js` → `hist*`:
 
-`histCreated`, `histMoved`, `histArchived`, `histRestored`, `histUpdated`, `histTitleChanged`, `histNotesChanged`, `histPriorityChanged`, `histProjectChanged`, `histEpicChanged`, `histEstimateChanged`, `histTagsChanged`, `histCommentAdded`, `histTimeLogged`, `histTimerStarted`, `histTimerStopped`, `histTimerDiscarded`, `histLinkAdded`, `histLinkRemoved`.
+`histCreated`, `histMoved`, `histArchived`, `histRestored`, `histUpdated`, `histTitleChanged`, `histNotesChanged`, `histPriorityChanged`, `histProjectChanged`, `histEpicChanged`, `histEstimateChanged`, `histTagsChanged`, `histCommentAdded`, `histCommentUpdated`, `histTimeLogged`, `histTimerStarted`, `histTimerStopped`, `histTimerDiscarded`, `histLinkAdded`, `histLinkRemoved`.
 
 ### 11.9 Delete card
 
@@ -759,12 +804,14 @@ Grid 1 columna; aside debajo `max-height: 38vh`; main `overflow-y: auto`.
 
 ---
 
-## 12. Scrollbars
+## 12. Scrollbars y resize
 
-| Clase | Comportamiento |
+| Clase / selector | Comportamiento |
 | --- | --- |
 | `.scroll-quiet` | Oculta; al hover thin 2px `--faint` 35–38% |
-| `.kuiper-scroll` / notes | `scrollbar-gutter: stable`; thin 3px; thumb transparent → faint 44% on hover |
+| `.kuiper-scroll` (notes, issue panels, picker hora, comentarios) | `scrollbar-gutter: stable`; thin 3px; thumb transparent → faint 44% on hover; sin botones (`::-webkit-scrollbar-button { display: none }`) |
+| Comentarios textarea | `.kuiper-comment-form textarea`, `.kuiper-comment-edit-input` — mismas reglas que `.kuiper-scroll` |
+| Tirador textarea | `::-webkit-resizer` — líneas diagonales `--faint`, fondo transparente |
 | Column body desktop | 8px thumb `--line` |
 | Swimlanes / board kuiper | scrollbars ocultos (`scrollbar-width: none`) |
 
@@ -867,6 +914,9 @@ Cache: `Cache-Control: no-cache` en estáticos locales.
 | QR invertido en dark | `.qr` siempre blanco |
 | Animación decorativa continua | solo timer discard pulse |
 | Omitir i18n es | claves en `en` + `es` |
+| `title` nativo para hints UI | `tooltip.js` / `data-tip` |
+| Grip resize blanco del SO | `::-webkit-resizer` temático |
+| Tabs issue con pills sueltas | `.seg.kuiper-issue-tabbar` |
 
 ---
 
@@ -884,4 +934,4 @@ Cache: `Cache-Control: no-cache` en estáticos locales.
 
 ---
 
-*Revisión: editor issue Kuiper, colaboración (tags, links, time, comments, history), swimlanes, timer con descartar. Mantener sincronizado con `styles.css`.*
+*Revisión: tooltips app, comentarios editables + scroll/tirador, tabs `.seg`, copy link en tarjeta, timer manual con picker, barra progreso tiempo, estimación en tracker. Mantener sincronizado con `styles.css`.*

@@ -1784,7 +1784,7 @@ let lastPointer = { x: 0, y: 0 };
 board.addEventListener('pointerdown', e => {
   if (e.button !== 0) return;
   const card = e.target.closest('.card');
-  if (!card || e.target.closest('.chip') || e.target.closest('.flag')) return;
+  if (!card || e.target.closest('.chip') || e.target.closest('.flag') || e.target.closest('.kuiper-card-id')) return;
 
   const sx = e.clientX, sy = e.clientY;
   // A mouse has a spare gesture — the pointer is already somewhere before it

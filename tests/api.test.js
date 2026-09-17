@@ -127,6 +127,13 @@ describe('api', () => {
       body: '**Hola** desde test',
     });
     assert.equal(comment.status, 201);
+    const commentId = comment.body.data.comment.id;
+
+    const updated = await request('PATCH', `/api/v1/cards/${encodeURIComponent(cardId)}/comments/${encodeURIComponent(commentId)}`, {
+      body: 'Texto editado',
+    });
+    assert.equal(updated.status, 200);
+    assert.equal(updated.body.data.comment.body, 'Texto editado');
 
     const manual = await request('POST', `/api/v1/cards/${encodeURIComponent(cardId)}/time-entries`, {
       started_at: '2026-03-10T09:00:00.000Z',

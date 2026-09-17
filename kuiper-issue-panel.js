@@ -12,6 +12,7 @@ const KuiperIssuePanel = (() => {
   let activeTab = 'comments';
   let timeMode = 'timer';
   let linkedOpen = true;
+  let editingCommentId = null;
 
   const DISCARD_ICON = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 4.5h11M6 4.5V3.25A.75.75 0 0 1 6.75 2.5h2.5a.75.75 0 0 1 .75.75V4.5m-5.5 0v8.25a1 1 0 0 0 1 1h6.5a1 1 0 0 0 1-1V4.5H4.5z"/><path d="M6.75 7.25v4.25M9.25 7.25v4.25"/></svg>';
 
@@ -264,19 +265,21 @@ const KuiperIssuePanel = (() => {
     tabs.id = 'kuiperIssueTabs';
     tabs.className = 'kuiper-issue-tabs';
     tabs.innerHTML = `
-      <div class="kuiper-issue-tabbar" role="tablist">
-        <button type="button" class="kuiper-issue-tab active" data-tab="comments" role="tab" data-i18n="tabComments"></button>
-        <button type="button" class="kuiper-issue-tab" data-tab="time" role="tab" data-i18n="tabTimeLog"></button>
-        <button type="button" class="kuiper-issue-tab" data-tab="history" role="tab" data-i18n="tabHistory"></button>
+      <div class="seg kuiper-issue-tabbar" role="tablist">
+        <button type="button" class="kuiper-issue-tab" data-tab="comments" role="tab" aria-pressed="true" data-i18n="tabComments"></button>
+        <button type="button" class="kuiper-issue-tab" data-tab="time" role="tab" aria-pressed="false" data-i18n="tabTimeLog"></button>
+        <button type="button" class="kuiper-issue-tab" data-tab="history" role="tab" aria-pressed="false" data-i18n="tabHistory"></button>
       </div>
       <div class="kuiper-issue-tabpanels">
         <section class="kuiper-issue-panel active" data-panel="comments" role="tabpanel">
-          <div class="kuiper-issue-scroll kuiper-scroll">
+          <div class="kuiper-comments-shell">
             <form class="kuiper-comment-form" id="kuiperCommentForm">
               <textarea id="kuiperCommentInput" rows="3" placeholder=""></textarea>
               <button type="submit" class="primary sm" data-i18n="addComment"></button>
             </form>
-            <div class="kuiper-comment-list" id="kuiperCommentList"></div>
+            <div class="kuiper-comment-list-scroll kuiper-scroll">
+              <div class="kuiper-comment-list" id="kuiperCommentList"></div>
+            </div>
           </div>
         </section>
         <section class="kuiper-issue-panel" data-panel="time" role="tabpanel" hidden>
@@ -305,6 +308,8 @@ const KuiperIssuePanel = (() => {
     document.getElementById('kuiperTimerStop')?.addEventListener('click', stopTimer);
     document.getElementById('kuiperTimerDiscard')?.addEventListener('click', discardTimer);
     document.getElementById('kuiperCommentForm')?.addEventListener('submit', submitComment);
+    document.getElementById('kuiperCommentList')?.addEventListener('click', onCommentListClick);
+    document.getElementById('kuiperCommentList')?.addEventListener('keydown', onCommentEditKeydown);
     document.getElementById('kuiperLinkedToggle')?.addEventListener('click', () => {
       linkedOpen = !linkedOpen;
       document.getElementById('kuiperLinkedBody')?.toggleAttribute('hidden', !linkedOpen);
@@ -560,10 +565,72 @@ const KuiperIssuePanel = (() => {
     await reloadDetail();
   }
 
+  function onCommentListClick(e) {
+    const btn = e.target.closest('[data-comment-act]');
+    if (!btn) return;
+    const item = btn.closest('[data-comment-id]');
+    const commentId = item?.dataset.commentId;
+    if (!commentId) return;
+    if (btn.dataset.commentAct === 'edit') {
+      editingCommentId = commentId;
+      renderComments();
+      const ta = document.querySelector(`#kuiperCommentList [data-comment-id="${CSS.escape(commentId)}"] .kuiper-comment-edit-input`);
+      if (ta) {
+        ta.focus();
+        ta.setSelectionRange(ta.value.length, ta.value.length);
+      }
+      return;
+    }
+    if (btn.dataset.commentAct === 'cancel') {
+      editingCommentId = null;
+      renderComments();
+      return;
+    }
+    if (btn.dataset.commentAct === 'save') {
+      e.preventDefault();
+      saveCommentEdit(commentId, item);
+    }
+  }
+
+  function onCommentEditKeydown(e) {
+    if (!e.target.classList.contains('kuiper-comment-edit-input')) return;
+    if (e.key === 'Escape') {
+      editingCommentId = null;
+      renderComments();
+      return;
+    }
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      const item = e.target.closest('[data-comment-id]');
+      const commentId = item?.dataset.commentId;
+      if (commentId) saveCommentEdit(commentId, item);
+    }
+  }
+
+  async function saveCommentEdit(commentId, itemEl) {
+    const item = itemEl || document.querySelector(`#kuiperCommentList [data-comment-id="${CSS.escape(commentId)}"]`);
+    const input = item?.querySelector('.kuiper-comment-edit-input');
+    const saveBtn = item?.querySelector('[data-comment-act="save"]');
+    const body = input?.value?.trim();
+    if (!body) return;
+    if (saveBtn) saveBtn.disabled = true;
+    try {
+      await KuiperStore.updateComment(currentCardId, commentId, body);
+      editingCommentId = null;
+      await reloadDetail();
+    } catch (err) {
+      console.warn('comment update failed', err);
+      ctx.toast?.(tr('commentSaveFailed'));
+      if (saveBtn) saveBtn.disabled = false;
+    }
+  }
+
   function setTab(name) {
     activeTab = name;
     document.querySelectorAll('.kuiper-issue-tab').forEach(btn => {
-      btn.classList.toggle('active', btn.dataset.tab === name);
+      const on = btn.dataset.tab === name;
+      btn.classList.toggle('active', on);
+      btn.setAttribute('aria-pressed', String(on));
     });
     document.querySelectorAll('.kuiper-issue-panel').forEach(panel => {
       const on = panel.dataset.panel === name;
@@ -977,6 +1044,7 @@ const KuiperIssuePanel = (() => {
       case 'estimated_changed': return tr('histEstimateChanged', { value: formatMinutes(p.estimated_minutes) });
       case 'tags_changed': return tr('histTagsChanged', { value: (p.tags || []).join(', ') });
       case 'comment_added': return tr('histCommentAdded');
+      case 'comment_updated': return tr('histCommentUpdated');
       case 'time_logged': return tr('histTimeLogged', { value: formatMinutes(p.duration_minutes) });
       case 'timer_started': return tr('histTimerStarted');
       case 'timer_stopped': return tr('histTimerStopped', { value: formatMinutes(p.duration_minutes) });
@@ -1002,6 +1070,32 @@ const KuiperIssuePanel = (() => {
       </article>`).join('');
   }
 
+  const COMMENT_EDIT_ICON = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11.25 2.75 13.25 4.75 5.5 12.5 3.25 12.75 3.5 10.5 11.25 2.75z"/><path d="M10 4 12 6"/></svg>';
+
+  function renderCommentItem(c) {
+    if (String(editingCommentId) === String(c.id)) {
+      return `
+      <article class="kuiper-comment-item is-editing" data-comment-id="${esc(c.id)}">
+        <div class="kuiper-comment-head">
+          <time>${esc(formatWhen(c.created_at))}</time>
+        </div>
+        <textarea class="kuiper-comment-edit-input" rows="4">${esc(c.body)}</textarea>
+        <div class="kuiper-comment-edit-actions">
+          <button type="button" class="ghost sm" data-comment-act="cancel">${esc(tr('cancel'))}</button>
+          <button type="button" class="primary sm" data-comment-act="save">${esc(tr('save'))}</button>
+        </div>
+      </article>`;
+    }
+    return `
+      <article class="kuiper-comment-item" data-comment-id="${esc(c.id)}">
+        <div class="kuiper-comment-head">
+          <time>${esc(formatWhen(c.created_at))}</time>
+          <button type="button" class="icon sm kuiper-comment-edit" data-comment-act="edit" title="${esc(tr('editComment'))}" aria-label="${esc(tr('editComment'))}">${COMMENT_EDIT_ICON}</button>
+        </div>
+        <div class="kuiper-md kuiper-comment-body">${renderMd(c.body)}</div>
+      </article>`;
+  }
+
   function renderComments() {
     const el = document.getElementById('kuiperCommentList');
     if (!el) return;
@@ -1010,11 +1104,7 @@ const KuiperIssuePanel = (() => {
       el.innerHTML = `<p class="kuiper-panel-empty">${esc(tr('noComments'))}</p>`;
       return;
     }
-    el.innerHTML = items.map(c => `
-      <article class="kuiper-comment-item">
-        <time>${esc(formatWhen(c.created_at))}</time>
-        <div class="kuiper-md kuiper-comment-body">${renderMd(c.body)}</div>
-      </article>`).join('');
+    el.innerHTML = items.map(renderCommentItem).join('');
   }
 
   function renderAll() {
@@ -1057,6 +1147,7 @@ const KuiperIssuePanel = (() => {
 
   async function onEditorOpen(cardId, draft) {
     ensureLayout();
+    editingCommentId = null;
     currentCardId = cardId;
     if (cardId === 'new') {
       detail = {
@@ -1084,6 +1175,7 @@ const KuiperIssuePanel = (() => {
   }
 
   function onEditorClose() {
+    editingCommentId = null;
     currentCardId = null;
     detail = null;
     stopTimerTick();

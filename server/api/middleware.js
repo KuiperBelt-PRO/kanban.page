@@ -29,7 +29,7 @@ function cors(req, res) {
   const host = req.headers.host || '';
   if (!/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(host)) return false;
   res.setHeader('Access-Control-Allow-Origin', `http://${host}`);
-  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,DELETE,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   return true;
 }

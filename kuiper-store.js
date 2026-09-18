@@ -3,10 +3,11 @@ const KuiperStore = (() => {
   const boardSlug = () => new URLSearchParams(location.search).get('board') || 'hub-delivery';
 
   async function request(path, options = {}) {
-    const res = await fetch(path, {
-      headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
-      ...options,
-    });
+    const headers = { ...(options.headers || {}) };
+    if (options.body != null && headers['Content-Type'] == null) {
+      headers['Content-Type'] = 'application/json';
+    }
+    const res = await fetch(path, { ...options, headers });
     const payload = await res.json();
     if (!res.ok || payload.ok === false) {
       throw new Error(payload.error?.message || `HTTP ${res.status}`);

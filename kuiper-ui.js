@@ -1152,9 +1152,51 @@ const KuiperUI = (() => {
     return lane ? `${lane}:${colEl.dataset.id}` : colEl.dataset.id;
   }
 
+  function buildCardProgress(t) {
+    const est = t.estimatedMinutes;
+    const logged = t.timeLoggedMinutes || 0;
+    if (!est || est <= 0) return '';
+    let greenPct = 0;
+    let redPct = 0;
+    if (logged <= est) greenPct = Math.min(100, (logged / est) * 100);
+    else {
+      greenPct = (est / logged) * 100;
+      redPct = 100 - greenPct;
+    }
+    return `<div class="kuiper-card-progress" aria-hidden="true">
+      <div class="kuiper-card-progress-track">
+        <div class="kuiper-card-progress-green" style="width:${greenPct}%"></div>
+        <div class="kuiper-card-progress-red" style="width:${redPct}%"></div>
+      </div>
+    </div>`;
+  }
+
+  function buildCardLinks(t) {
+    const seen = new Set();
+    const links = [];
+    for (const group of [t.blockedBy, t.blocks, t.related]) {
+      for (const item of group || []) {
+        if (!item?.id || seen.has(item.id)) continue;
+        seen.add(item.id);
+        links.push(item);
+      }
+    }
+    if (!links.length) return '';
+    const max = 3;
+    const visible = links.slice(0, max);
+    const extra = links.length - max;
+    const chips = visible.map(l => `
+      <span class="kuiper-card-link-chip" title="${esc(l.title || '')}">
+        <span class="kuiper-card-link-id">${esc(l.id)}</span>
+      </span>`).join('');
+    const more = extra > 0 ? `<span class="kuiper-card-link-more">+${extra}</span>` : '';
+    return `<div class="kuiper-card-links" aria-label="${esc(tr('linkedActivities'))}">${chips}${more}</div>`;
+  }
+
   function buildCardMeta(t, project, since) {
     const epic = t.epicId ? epicOf(t.epicId) : null;
-    if (!project && !epic && !since) return '';
+    const progressHtml = buildCardProgress(t);
+    const linksHtml = buildCardLinks(t);
     const tags = [];
     if (project) {
       tags.push(`<span class="kuiper-tag proj"><span class="tag-kind">${esc(tr('project'))}</span><span class="tag-val"><span class="dot" aria-hidden="true"></span><span class="lbl">${esc(project.name)}</span></span></span>`);
@@ -1164,13 +1206,17 @@ const KuiperUI = (() => {
       const epicStyle = ec ? ` style="--c:${esc(ec)}"` : '';
       tags.push(`<span class="kuiper-tag epic"${epicStyle}><span class="tag-kind">${esc(tr('epic'))}</span><span class="tag-val"><span class="tri" aria-hidden="true"></span><span class="lbl">${esc(epic.title)}</span></span></span>`);
     }
-    (t.tags || []).slice(0, 3).forEach(name => {
+    (t.tags || []).forEach(name => {
       const c = tagColor(name);
       tags.push(`<span class="kuiper-tag label" style="--c:${esc(c)}"><span class="tag-val"><span class="lbl">${esc(name)}</span></span></span>`);
     });
     const tagsHtml = tags.length ? `<div class="kuiper-card-tags">${tags.join('')}</div>` : '';
     const ageHtml = since ? `<span class="age" title="Untouched for ${since}">${since}</span>` : '';
-    return `<div class="kuiper-card-foot">${tagsHtml}${ageHtml}</div>`;
+    const footHtml = (tagsHtml || ageHtml)
+      ? `<div class="kuiper-card-foot">${tagsHtml}${ageHtml}</div>`
+      : '';
+    if (!progressHtml && !linksHtml && !footHtml) return '';
+    return `${progressHtml}${linksHtml}${footHtml}`;
   }
 
   function decorateCardMeta(t, metaHtml) {
@@ -2068,6 +2114,8 @@ const KuiperUI = (() => {
     flushEditor,
     patchFromTask,
     buildCreateBody,
+    mountSelect: updateEditorSelect,
+    closeDropMenus,
     renderSidebar,
     mountRailControls,
     renderRailControls,

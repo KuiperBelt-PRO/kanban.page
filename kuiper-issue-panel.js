@@ -12,6 +12,8 @@ const KuiperIssuePanel = (() => {
   let activeTab = 'comments';
   let timeMode = 'timer';
   let linkedOpen = true;
+  let linkKind = 'blocks';
+  let linkUiBound = false;
   let editingCommentId = null;
   let editingTimeEntryId = null;
 
@@ -250,19 +252,27 @@ const KuiperIssuePanel = (() => {
         <button type="button" class="icon sm kuiper-linked-add" id="kuiperLinkedAddBtn" title="">+</button>
       </header>
       <div class="kuiper-linked-body" id="kuiperLinkedBody">
-        <div class="kuiper-linked-groups" id="kuiperLinkedGroups"></div>
+        <div class="kuiper-linked-groups kuiper-scroll" id="kuiperLinkedGroups"></div>
         <div class="kuiper-linked-compose" id="kuiperLinkedCompose" hidden>
-          <select id="kuiperLinkKind" class="kuiper-linked-kindsel" aria-label="">
-            <option value="blocks" data-i18n="linkKindBlocks"></option>
-            <option value="blockedBy" data-i18n="linkKindBlockedBy"></option>
-            <option value="related" data-i18n="linkKindRelated"></option>
-          </select>
-          <input type="text" id="kuiperLinkInput" class="kuiper-linked-input" list="kuiperCardPicker" autocomplete="off" spellcheck="false">
+          <div class="kuiper-linked-kind-ctrl" id="kuiperLinkKindCtrl">
+            <button type="button" class="kuiper-linked-kind-btn" id="kuiperLinkKindBtn" aria-haspopup="listbox" aria-expanded="false">
+              <span class="kuiper-linked-kind-label" id="kuiperLinkKindLabel"></span>
+              <span class="kuiper-linked-kind-chev" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6l4 4 4-4"/></svg></span>
+            </button>
+          </div>
+          <div class="kuiper-linked-input-wrap">
+            <input type="text" id="kuiperLinkInput" class="kuiper-linked-input" autocomplete="off" spellcheck="false">
+          </div>
           <button type="button" class="ghost sm" id="kuiperLinkConfirm" data-i18n="add"></button>
         </div>
-      </div>
-      <datalist id="kuiperCardPicker"></datalist>`;
-    stack.append(linked);
+      </div>`;
+    let lower = stack.querySelector('.kuiper-issue-lower');
+    if (!lower) {
+      lower = document.createElement('div');
+      lower.className = 'kuiper-issue-lower';
+      stack.append(lower);
+    }
+    lower.append(linked);
 
     const tabs = document.createElement('div');
     tabs.id = 'kuiperIssueTabs';
@@ -296,7 +306,16 @@ const KuiperIssuePanel = (() => {
           </div>
         </section>
       </div>`;
-    stack.append(tabs);
+    lower.append(tabs);
+
+    if (!document.getElementById('kuiperLinkSuggest')) {
+      const suggest = document.createElement('div');
+      suggest.id = 'kuiperLinkSuggest';
+      suggest.className = 'kuiper-link-suggest';
+      suggest.hidden = true;
+      document.body.append(suggest);
+    }
+    ensureLinkKindMenuPortal();
 
     const tagInput = document.getElementById('kuiperTagInput');
     tagInput?.addEventListener('keydown', onTagKeydown);
@@ -323,15 +342,34 @@ const KuiperIssuePanel = (() => {
     document.getElementById('kuiperLinkedAddBtn')?.addEventListener('click', () => {
       const compose = document.getElementById('kuiperLinkedCompose');
       compose?.removeAttribute('hidden');
-      document.getElementById('kuiperLinkInput')?.focus();
+      const input = document.getElementById('kuiperLinkInput');
+      input?.focus();
+      onLinkInput();
     });
-    document.getElementById('kuiperLinkConfirm')?.addEventListener('click', () => {
-      addLink(document.getElementById('kuiperLinkKind')?.value || 'blocks');
+    document.getElementById('kuiperLinkKindBtn')?.addEventListener('mousedown', e => {
+      e.preventDefault();
+      e.stopPropagation();
+      toggleLinkKindMenu();
+    });
+    document.getElementById('kuiperLinkConfirm')?.addEventListener('click', () => addLink(linkKind));
+    document.getElementById('kuiperLinkInput')?.addEventListener('mousedown', e => {
+      e.stopPropagation();
+      onLinkInput();
+    });
+    document.getElementById('kuiperLinkInput')?.addEventListener('input', onLinkInput);
+    document.getElementById('kuiperLinkInput')?.addEventListener('focus', onLinkInput);
+    document.getElementById('kuiperLinkInput')?.addEventListener('blur', () => {
+      setTimeout(() => hideLinkSuggest(), 160);
     });
     document.getElementById('kuiperLinkInput')?.addEventListener('keydown', e => {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        const first = document.querySelector('#kuiperLinkSuggest .kuiper-link-suggest-item');
+        if (first) { e.preventDefault(); first.focus(); }
+        return;
+      }
       if (e.key === 'Enter') {
         e.preventDefault();
-        addLink(document.getElementById('kuiperLinkKind')?.value || 'blocks');
+        addLink(linkKind);
       }
     });
     document.querySelectorAll('.kuiper-time-modebar button[data-mode]').forEach(btn => {
@@ -343,6 +381,23 @@ const KuiperIssuePanel = (() => {
     tabs.querySelectorAll('.kuiper-issue-tab').forEach(btn => {
       btn.addEventListener('click', () => setTab(btn.dataset.tab));
     });
+    if (!linkUiBound) {
+      linkUiBound = true;
+      document.addEventListener('click', e => {
+        if (!e.target.closest('#kuiperLinkKindCtrl, #kuiperLinkKindMenu')) hideLinkKindMenu();
+        if (!e.target.closest('#kuiperLinkInput, #kuiperLinkSuggest, #kuiperLinkKindMenu, #kuiperLinkedCompose, #kuiperLinkedAddBtn')) {
+          hideLinkSuggest();
+        }
+      });
+      window.addEventListener('resize', () => {
+        positionLinkSuggest();
+        positionLinkKindMenu();
+      });
+      window.addEventListener('scroll', () => {
+        positionLinkSuggest();
+        positionLinkKindMenu();
+      }, true);
+    }
   }
 
   function resolveCardRef(raw) {
@@ -426,6 +481,154 @@ const KuiperIssuePanel = (() => {
     document.getElementById('kuiperTagSuggest')?.setAttribute('hidden', '');
   }
 
+  const LINK_KINDS = [
+    { value: 'blocks', labelKey: 'linkKindBlocks' },
+    { value: 'blockedBy', labelKey: 'linkKindBlockedBy' },
+    { value: 'related', labelKey: 'linkKindRelated' },
+  ];
+
+  function ensureLinkKindMenuPortal() {
+    document.querySelector('#kuiperLinkKindCtrl #kuiperLinkKindMenu')?.remove();
+    if (!document.getElementById('kuiperLinkKindMenu')) {
+      const kindMenu = document.createElement('div');
+      kindMenu.id = 'kuiperLinkKindMenu';
+      kindMenu.className = 'kuiper-linked-kind-menu';
+      kindMenu.setAttribute('role', 'listbox');
+      kindMenu.hidden = true;
+      document.body.append(kindMenu);
+    }
+    document.getElementById('kuiperLinkedGroups')?.classList.add('kuiper-scroll');
+  }
+
+  function restoreLinkSuggestIfFocused() {
+    const input = document.getElementById('kuiperLinkInput');
+    if (input && document.activeElement === input) onLinkInput();
+  }
+
+  function hideLinkKindMenu(restoreSuggest = true) {
+    const menu = document.getElementById('kuiperLinkKindMenu');
+    if (menu) menu.hidden = true;
+    document.getElementById('kuiperLinkKindBtn')?.setAttribute('aria-expanded', 'false');
+    if (restoreSuggest) {
+      requestAnimationFrame(() => restoreLinkSuggestIfFocused());
+    }
+  }
+
+  function positionLinkKindMenu() {
+    const btn = document.getElementById('kuiperLinkKindBtn');
+    const menu = document.getElementById('kuiperLinkKindMenu');
+    if (!btn || !menu || menu.hidden) return;
+    const r = btn.getBoundingClientRect();
+    const width = Math.max(Math.round(r.width), 160);
+    let left = r.left;
+    if (left + width > window.innerWidth - 8) left = window.innerWidth - 8 - width;
+    menu.style.left = `${Math.round(left)}px`;
+    menu.style.top = `${Math.round(r.bottom + 4)}px`;
+    menu.style.width = `${width}px`;
+  }
+
+  function toggleLinkKindMenu() {
+    const menu = document.getElementById('kuiperLinkKindMenu');
+    const btn = document.getElementById('kuiperLinkKindBtn');
+    if (!menu || !btn) return;
+    hideLinkSuggest();
+    if (!menu.hidden) {
+      hideLinkKindMenu();
+      return;
+    }
+    renderLinkKindSelect();
+    menu.hidden = false;
+    btn.setAttribute('aria-expanded', 'true');
+    positionLinkKindMenu();
+  }
+
+  function linkedCardIds() {
+    const ids = new Set();
+    const links = detail?.links || {};
+    ['blockedBy', 'blocks', 'related'].forEach(kind => {
+      (links[kind] || []).forEach(item => {
+        const id = normalizeLink(item).id;
+        if (id) ids.add(id);
+      });
+    });
+    return ids;
+  }
+
+  function renderLinkKindSelect() {
+    const label = document.getElementById('kuiperLinkKindLabel');
+    const menu = document.getElementById('kuiperLinkKindMenu');
+    const current = LINK_KINDS.find(k => k.value === linkKind) || LINK_KINDS[0];
+    if (label) label.textContent = tr(current.labelKey);
+    if (!menu) return;
+    menu.innerHTML = LINK_KINDS.map(kind => `
+      <button type="button" class="kuiper-linked-kind-opt${kind.value === linkKind ? ' is-active' : ''}" data-kind="${esc(kind.value)}" role="option" aria-selected="${kind.value === linkKind}">
+        ${esc(tr(kind.labelKey))}
+      </button>`).join('');
+    menu.querySelectorAll('.kuiper-linked-kind-opt').forEach(opt => {
+      opt.addEventListener('mousedown', e => {
+        e.preventDefault();
+        linkKind = opt.dataset.kind;
+        renderLinkKindSelect();
+        hideLinkKindMenu(false);
+        const input = document.getElementById('kuiperLinkInput');
+        input?.focus();
+        onLinkInput();
+      });
+    });
+  }
+
+  function hideLinkSuggest() {
+    const box = document.getElementById('kuiperLinkSuggest');
+    if (!box) return;
+    box.hidden = true;
+    box.innerHTML = '';
+  }
+
+  function positionLinkSuggest() {
+    const input = document.getElementById('kuiperLinkInput');
+    const box = document.getElementById('kuiperLinkSuggest');
+    if (!input || !box || box.hidden) return;
+    const r = input.getBoundingClientRect();
+    const width = Math.min(420, Math.max(r.width, 220));
+    let left = r.left;
+    if (left + width > window.innerWidth - 8) left = window.innerWidth - 8 - width;
+    box.style.left = `${Math.round(left)}px`;
+    box.style.top = `${Math.round(r.bottom + 4)}px`;
+    box.style.width = `${Math.round(width)}px`;
+  }
+
+  function onLinkInput() {
+    const input = document.getElementById('kuiperLinkInput');
+    const box = document.getElementById('kuiperLinkSuggest');
+    if (!input || !box) return;
+    hideLinkKindMenu(false);
+    const q = input.value.trim().toLowerCase();
+    const linked = linkedCardIds();
+    const matches = boardTasks()
+      .filter(t => t.id !== currentCardId)
+      .filter(t => !linked.has(t.id))
+      .filter(t => !q || t.id.toLowerCase().includes(q) || t.title.toLowerCase().includes(q))
+      .slice(0, 8);
+    if (!matches.length) {
+      hideLinkSuggest();
+      return;
+    }
+    box.innerHTML = matches.map(t => `
+      <button type="button" class="kuiper-link-suggest-item" data-id="${esc(t.id)}">
+        <span class="kuiper-link-suggest-id">${esc(t.id)}</span>
+        <span class="kuiper-link-suggest-title">${esc(t.title)}</span>
+      </button>`).join('');
+    box.hidden = false;
+    positionLinkSuggest();
+    box.querySelectorAll('.kuiper-link-suggest-item').forEach(btn => {
+      btn.addEventListener('mousedown', e => {
+        e.preventDefault();
+        input.value = btn.dataset.id;
+        hideLinkSuggest();
+      });
+    });
+  }
+
   function onTagInput() {
     const input = document.getElementById('kuiperTagInput');
     const box = document.getElementById('kuiperTagSuggest');
@@ -470,6 +673,7 @@ const KuiperIssuePanel = (() => {
     await KuiperStore.addCardLink(currentCardId, body);
     const input = document.getElementById('kuiperLinkInput');
     if (input) input.value = '';
+    hideLinkSuggest();
     document.getElementById('kuiperLinkedCompose')?.setAttribute('hidden', '');
     await reloadDetail();
     ctx.refreshBoard?.();
@@ -675,6 +879,7 @@ const KuiperIssuePanel = (() => {
     }
     if (btn.dataset.timeAct === 'delete') {
       e.preventDefault();
+      e.stopPropagation();
       deleteTimeEntry(entryId);
     }
   }
@@ -779,12 +984,7 @@ const KuiperIssuePanel = (() => {
     el.querySelectorAll('.kuiper-linked-remove').forEach(btn => {
       btn.onclick = () => removeLink(btn.dataset.linkId);
     });
-    const kindSel = document.getElementById('kuiperLinkKind');
-    if (kindSel) {
-      kindSel.querySelectorAll('option[data-i18n]').forEach(opt => {
-        opt.textContent = tr(opt.dataset.i18n);
-      });
-    }
+    renderLinkKindSelect();
     const addBtn = document.getElementById('kuiperLinkedAddBtn');
     if (addBtn) addBtn.title = tr('add');
   }
@@ -815,12 +1015,8 @@ const KuiperIssuePanel = (() => {
   }
 
   function renderCardPicker() {
-    const list = document.getElementById('kuiperCardPicker');
-    if (!list) return;
-    list.innerHTML = boardTasks()
-      .filter(t => t.id !== currentCardId)
-      .map(t => `<option value="${esc(t.id)}">${esc(t.id)} — ${esc(t.title)}</option>`)
-      .join('');
+    const input = document.getElementById('kuiperLinkInput');
+    if (input && document.activeElement === input) onLinkInput();
   }
 
   function timerElapsedMs() {
@@ -1321,6 +1517,7 @@ const KuiperIssuePanel = (() => {
 
   async function onEditorOpen(cardId, draft) {
     ensureLayout();
+    ensureLinkKindMenuPortal();
     editingCommentId = null;
     editingTimeEntryId = null;
     currentCardId = cardId;
@@ -1354,6 +1551,8 @@ const KuiperIssuePanel = (() => {
     editingTimeEntryId = null;
     currentCardId = null;
     detail = null;
+    hideLinkSuggest();
+    hideLinkKindMenu();
     stopTimerTick();
   }
 

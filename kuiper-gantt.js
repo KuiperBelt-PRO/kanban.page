@@ -294,6 +294,48 @@ const KuiperGantt = (() => {
       document.head.append(el);
     }
     const rules = [];
+    let pastProject = false;
+    for (const t of tasks) {
+      const num = t.id;
+      const kind = t.data?.rowKind;
+      const color = t.color || idMaps.numToColor.get(num);
+      if (kind === 'project') {
+        const c = color || 'var(--faint)';
+        const sep = pastProject
+          ? 'inset 0 1px 0 color-mix(in srgb,var(--line) 85%,transparent),inset 3px 0 0 '
+          : 'inset 3px 0 0 ';
+        pastProject = true;
+        rules.push(
+          `.kuiper-gantt-v2 [data-pane="left"] .gantt-row[data-task-id="${num}"]{`
+          + `background:color-mix(in srgb,${c} 14%,var(--raise))!important;`
+          + `box-shadow:${sep}${c}!important;`
+          + `font-size:11px;font-weight:600;letter-spacing:.03em;text-transform:uppercase;`
+          + `}`,
+          `.kuiper-gantt-v2 [data-pane="left"] .gantt-row[data-task-id="${num}"] > div:nth-child(2) > span:last-child{`
+          + `color:color-mix(in srgb,${c} 55%,var(--text))!important;font-weight:600;`
+          + `}`,
+        );
+      } else if (kind === 'epic') {
+        const c = color || 'var(--faint)';
+        rules.push(
+          `.kuiper-gantt-v2 [data-pane="left"] .gantt-row[data-task-id="${num}"]{`
+          + `background:color-mix(in srgb,${c} 10%,var(--surface))!important;`
+          + `box-shadow:inset 3px 0 0 color-mix(in srgb,${c} 70%,transparent)!important;`
+          + `font-size:11px;font-weight:500;`
+          + `}`,
+          `.kuiper-gantt-v2 [data-pane="left"] .gantt-row[data-task-id="${num}"] > div:nth-child(2) > span:last-child{`
+          + `color:color-mix(in srgb,${c} 45%,var(--text))!important;`
+          + `}`,
+        );
+      } else if (kind === 'group') {
+        rules.push(
+          `.kuiper-gantt-v2 [data-pane="left"] .gantt-row[data-task-id="${num}"]{`
+          + `background:color-mix(in srgb,var(--raise) 45%,var(--surface))!important;`
+          + `font-size:11px;font-weight:500;`
+          + `}`,
+        );
+      }
+    }
     for (const [num, color] of idMaps.numToColor) {
       const key = idMaps.numToCard.get(num);
       const summary = !key?.startsWith('card:');
@@ -328,10 +370,7 @@ const KuiperGantt = (() => {
       bezierRaf = requestAnimationFrame(() => {
         bezierRaf = requestAnimationFrame(() => {
           const ganttRoot = root || shellEl?.querySelector('.gantt-root');
-          if (ganttRoot) {
-            tagGanttRows(ganttRoot);
-            syncBezierDeps(ganttRoot);
-          }
+          if (ganttRoot) syncBezierDeps(ganttRoot);
         });
       });
     });
@@ -403,33 +442,6 @@ const KuiperGantt = (() => {
       svg.setAttribute('height', parseFloat(abs.style.height) || abs.scrollHeight);
     }
     return overlay.querySelector(`#${BEZIER_GROUP_ID}`);
-  }
-
-  function tagGanttRows(root) {
-    const left = root.querySelector('[data-pane="left"]');
-    if (!left) return;
-    let pastFirstProject = false;
-    left.querySelectorAll('.gantt-row').forEach(row => {
-      const num = Number(row.dataset.taskId);
-      const key = idMaps.numToCard.get(num);
-      row.removeAttribute('data-kuiper-project');
-      row.removeAttribute('data-kuiper-epic');
-      row.removeAttribute('data-kuiper-task');
-      row.removeAttribute('data-kuiper-group');
-      row.removeAttribute('data-kuiper-proj-sep');
-      if (!key) return;
-      if (key.startsWith('grp:project:')) {
-        row.dataset.kuiperProject = '1';
-        if (pastFirstProject) row.dataset.kuiperProjSep = '1';
-        pastFirstProject = true;
-      } else if (key.startsWith('grp:epic:')) {
-        row.dataset.kuiperEpic = '1';
-      } else if (key.startsWith('grp:priority:')) {
-        row.dataset.kuiperGroup = '1';
-      } else if (key.startsWith('card:')) {
-        row.dataset.kuiperTask = '1';
-      }
-    });
   }
 
   function syncBezierDeps(root) {

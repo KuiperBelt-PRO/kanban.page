@@ -45,8 +45,8 @@ holds bytes it cannot decrypt. Every device keeps a complete local copy, and
 sync is reversible from either end. See [docs/sync.md](docs/sync.md).
 
 **Want it to work differently? Ask your agent.** ~4,000 lines of vanilla HTML/CSS/JS,
-no build step, no dependencies, and a `CLAUDE.md` that lands an agent oriented
-instead of guessing.
+no build step, no dependencies, and an [`AGENTS.md`](AGENTS.md) (plus specs in
+[`docs/`](docs/README.md)) that lands an agent oriented instead of guessing.
 
 ![dark mode](docs/shots/dark.png)
 

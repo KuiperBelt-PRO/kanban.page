@@ -1,4 +1,4 @@
-# DESIGN.md — kanban.page
+# Sistema de diseño — kanban.page
 
 Especificación **completa** del sistema de diseño actual. Toda feature UI nueva debe cumplirla. Si algo no está aquí, no está definido — amplía este documento en el mismo PR.
 
@@ -6,20 +6,20 @@ Especificación **completa** del sistema de diseño actual. Toda feature UI nuev
 
 | Documento | Rol |
 | --- | --- |
-| [`docs/design-brief.md`](docs/design-brief.md) | Intención de producto, decisiones cerradas, motion resumido |
-| [`docs/kuiper-architecture.md`](docs/kuiper-architecture.md) | SQLite, API, `?kuiper=1` |
-| [`docs/i18n-spec.md`](docs/i18n-spec.md) | Internacionalización |
-| [`CLAUDE.md`](CLAUDE.md) | Arquitectura y reglas de dominio |
+| [`design-brief.md`](design-brief.md) | Intención de producto, decisiones cerradas, motion resumido |
+| [`specs/`](specs/) | Comportamiento funcional por área |
+| [`i18n-spec.md`](i18n-spec.md) | Internacionalización |
+| [`../AGENTS.md`](../AGENTS.md) | Guía para agentes y mapa de documentación |
 
-**Jerarquía de conflictos:** tokens/clases → `styles.css`; comportamiento visual → este doc; reglas de negocio → README / `CLAUDE.md`.
+**Jerarquía de conflictos:** tokens/clases → `styles.css`; comportamiento visual → este doc; reglas de negocio → `docs/specs/` y README.
 
 ```mermaid
 flowchart TB
   subgraph docs [Documentación]
     DB[design-brief.md<br/>intención producto]
-    DM[DESIGN.md<br/>sistema visual]
-    KA[kuiper-architecture.md<br/>SQLite + API]
-    CL[CLAUDE.md<br/>dominio y código]
+    DM[design-system.md<br/>sistema visual]
+    SP[specs/<br/>comportamiento]
+    AG[AGENTS.md<br/>guía agente]
   end
   subgraph code [Código]
     CSS[styles.css]
@@ -29,8 +29,9 @@ flowchart TB
   end
   DB --> DM
   DM --> CSS
-  CL --> APP
-  KA --> KUI
+  SP --> APP
+  SP --> KUI
+  AG --> SP
 ```
 
 ---
@@ -929,7 +930,7 @@ Cache: `Cache-Control: no-cache` en estáticos locales.
 - [ ] Clases `kuiper-*` si aplica
 - [ ] Scroll flex con `min-height: 0`
 - [ ] `STATIC_FILES` si hay asset nuevo
-- [ ] `DESIGN.md` actualizado si introduces patrón nuevo
+- [ ] `docs/design-system.md` actualizado si introduces patrón nuevo
 - [ ] Sin globals opcionales con `?.` sin guard
 
 ---

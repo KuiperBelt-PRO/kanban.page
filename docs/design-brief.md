@@ -1,6 +1,6 @@
 # board — design brief
 
-> **Especificación visual y de componentes (canónica, actualizada):** [`../DESIGN.md`](../DESIGN.md)  
+> **Especificación visual y de componentes (canónica, actualizada):** [`design-system.md`](design-system.md)  
 > **Fork Kuiper (SQLite, API, issue panel):** [`kuiper-architecture.md`](kuiper-architecture.md)
 
 A personal kanban for developers who run AI coding agents (Claude Code, Codex) in the terminal. The upstream app ships as vanilla HTML/CSS/JS with optional E2E sync; the **Kuiper fork** adds local SQLite, stable issue IDs (`kb…`), and a full issue editor.
@@ -47,7 +47,7 @@ flowchart TB
 | 5 | Projects: add / rename / recolor / delete | ✅ Panel `P`, 8-color palette |
 | 6 | Core kanban: CRUD, stages, filter, search, undo, backup | ✅ |
 | 7 | Weekly report (America/Santiago, date override, partial export) | ✅ Modal `R`; export by tick |
-| 8 | Minimal, animated, non-distracting UI | ✅ See [`DESIGN.md`](../DESIGN.md) |
+| 8 | Minimal, animated, non-distracting UI | ✅ See [`design-system.md`](design-system.md) |
 | 9 | *(added)* EN/ES interface | ✅ `i18n.js`, [`i18n-spec.md`](i18n-spec.md) |
 | 10 | *(added)* Optional E2E sync between devices | ✅ `docs/sync.md` — not used in Kuiper local mode |
 | 11 | *(added, Kuiper)* Issue IDs, epics, priority, tags, links, time, comments, history | ✅ `?kuiper=1` |
@@ -144,7 +144,7 @@ Large sheet (`min(960px)`, ~90vh): **main** (título, etapas, descripción markd
 - Timer en aside: estimación + barra progreso antes de Timer/Manual; registro manual con picker fecha/hora in-app.
 - Footer clásico oculto; acciones en menú `⋯` del header.
 
-Detalle completo: [`DESIGN.md` §11](../DESIGN.md).
+Detalle completo: [`design-system.md` §11](design-system.md).
 
 ```mermaid
 flowchart TB
@@ -187,7 +187,7 @@ flowchart TB
   events: [{ id, taskId, title, type: 'created'|'moved', from, to, at, day }],
   filter: null | projectId,         // legacy single filter
   flagFilter: boolean,
-  // + sync metadata when enabled (_contentGen, clocks, etc.) — see CLAUDE.md
+  // + sync metadata when enabled (_contentGen, clocks, etc.) — see AGENTS.md / classic-board spec
 }
 ```
 
@@ -308,7 +308,7 @@ No tutorial copy. Empty columns use **`.phantom`** (quiet slot + amber cursor bl
 
 ## Chroma — resolved
 
-One accent + **eight project colors** (same as entity palette). **No stage-level color.** Kuiper adds priority hues and per-tag hash colors — still bounded to the same palette logic. See [`DESIGN.md` §8](../DESIGN.md).
+One accent + **eight project colors** (same as entity palette). **No stage-level color.** Kuiper adds priority hues and per-tag hash colors — still bounded to the same palette logic. See [`design-system.md` §8](design-system.md).
 
 ---
 
@@ -374,8 +374,8 @@ sequenceDiagram
 
 | Need | Document |
 | --- | --- |
-| Tokens, components, Kuiper UI rules | [`DESIGN.md`](../DESIGN.md) |
+| Tokens, components, Kuiper UI rules | [`design-system.md`](design-system.md) |
 | Sync invariants | [`sync.md`](sync.md) |
 | CLI / agents | [`cli.md`](cli.md), [`agents.md`](agents.md) |
 | i18n | [`i18n-spec.md`](i18n-spec.md) |
-| Code architecture | [`CLAUDE.md`](../CLAUDE.md) |
+| Code architecture | [`AGENTS.md`](../AGENTS.md), [`specs/`](specs/) |

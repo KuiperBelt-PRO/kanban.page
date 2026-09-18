@@ -1,5 +1,7 @@
 # Kuiper fork — arquitectura local
 
+> **Spec completa:** [`specs/kuiper-platform.md`](specs/kuiper-platform.md)
+
 Este fork añade persistencia **SQLite** y modo local sin relay upstream.
 
 ## Capas

@@ -219,7 +219,7 @@ resolves, the CLI errors and lists the configured boards; it never picks one.
 
 ### Name and id resolution
 
-Duplicate stage names are legal and must both survive (`CLAUDE.md:72`), and the
+Duplicate stage names are legal and must both survive (`docs/specs/classic-board.md`), and the
 app permits duplicate project names too. So **every resolver fails on ambiguity
 rather than picking**: multiple matches print each match with its id and exit
 with the usage code. `--stage-id` and `--project-id` take an id directly.
@@ -266,7 +266,7 @@ Mirrors the keyboard move (`app.js:1449`):
   name and both stage names (`app.js:1024`).
 
 `done` targets `columns[columns.length - 1]`. The done stage is a position,
-never a name (`CLAUDE.md:72`); `done` resolves it by index and must never look
+never a name (`docs/specs/classic-board.md`); `done` resolves it by index and must never look
 for a stage called "Done".
 
 ### `kanban edit <id> [--title T] [--notes N] [--session S] [--project P|--no-project] [--flag|--no-flag]`
@@ -297,7 +297,7 @@ last column's name. The CLI builds `lookup` from the fetched tasks and passes
 `columns[columns.length - 1].name` as `doneStage`, mirroring `app.js:3168`.
 
 `--week` must be a Monday, or is normalised through `C.mondayOf`; weeks run
-Monday–Sunday in America/Santiago (`CLAUDE.md:46`) and an arbitrary date would
+Monday–Sunday in America/Santiago (`docs/specs/classic-board.md`) and an arbitrary date would
 silently report a different span.
 
 `--md` emits the entries `aggregateWeek` pre-ticked via `include`, matching what
@@ -337,7 +337,7 @@ must be `https:` (except `localhost`), and every fetch uses `redirect: 'error'`
 so a redirect cannot move the token to another host.
 
 **Forgetting a board is recoverable.** The secret may exist nowhere else
-(`CLAUDE.md:93`), so:
+(`docs/specs/classic-board.md`), so:
 
 - `board add` **rejects an existing name** rather than overwriting it, checking
   the config *and* the keychain — `keychainSet` passes `-U`, so a lost or
@@ -369,7 +369,7 @@ status, and not `1` for everything.
 
 ## Invariants this must not break
 
-From `CLAUDE.md`; they are why the CLI reuses `core.js` rather than talking to
+From `AGENTS.md` / `docs/specs/classic-board.md`; they are why the CLI reuses `core.js` rather than talking to
 the relay directly.
 
 - **Clocks are wound in exactly one place.** The CLI calls `C.stampChanges` and

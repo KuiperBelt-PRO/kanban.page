@@ -49,6 +49,8 @@ function snapshotToState(snapshot) {
       blockedBy: (card.blocked_by || []).map(l => ({ id: l.id, title: l.title, linkId: l.link_id })),
       blocks: (card.blocks || []).map(l => ({ id: l.id, title: l.title, linkId: l.link_id })),
       related: (card.related || []).map(l => ({ id: l.id, title: l.title, linkId: l.link_id })),
+      scheduleStartDate: card.schedule_start_date || null,
+      scheduleEndDate: card.schedule_end_date || null,
       timeLoggedMinutes: card.time_logged_minutes || 0,
       activeTimer: card.active_timer ? {
         id: card.active_timer.id,

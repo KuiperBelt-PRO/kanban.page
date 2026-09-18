@@ -8,6 +8,8 @@ const projects = require('../../server/db/repositories/projects.js');
 const boards = require('../../server/db/repositories/boards.js');
 const epics = require('../../server/db/repositories/epics.js');
 const cards = require('../../server/db/repositories/cards.js');
+const cardLinks = require('../../server/db/repositories/card-links.js');
+const BoardCore = require('../../core.js');
 const { printOk, printErr, humanErr } = require('./json.js');
 const { backfill003 } = require('../../server/db/backfill-003.js');
 
@@ -73,6 +75,50 @@ function ensureCard(db, boardId, projectId, title, fields = {}) {
     title,
     ...fields,
   });
+}
+
+function cardIdByTitle(db, boardId, title) {
+  const row = db.prepare('SELECT id FROM cards WHERE board_id = ? AND title = ? AND archived = 0 LIMIT 1')
+    .get(boardId, title);
+  return row?.id || null;
+}
+
+function ensureBlocksLink(db, boardId, fromTitle, toTitle) {
+  const fromId = cardIdByTitle(db, boardId, fromTitle);
+  const toId = cardIdByTitle(db, boardId, toTitle);
+  if (!fromId || !toId) return false;
+  cardLinks.add(db, { from_card_id: fromId, to_card_id: toId, link_type: 'blocks' });
+  return true;
+}
+
+function backfillDemoSchedules(db, boardId) {
+  const today = BoardCore.ymd();
+  const specs = [
+    { title: 'Optimizar raster Mermaid en PDF', schedule_start_date: BoardCore.addDays(today, -45), schedule_end_date: BoardCore.addDays(today, -38) },
+    { title: 'Documentar deploy interno', schedule_start_date: BoardCore.addDays(today, -36), schedule_end_date: BoardCore.addDays(today, -30) },
+    { title: 'Implementar MCP kuiper-kanban', schedule_start_date: BoardCore.addDays(today, -28), schedule_end_date: BoardCore.addDays(today, -18) },
+    { title: 'Revisar tests API navigation', schedule_start_date: BoardCore.addDays(today, -16), schedule_end_date: BoardCore.addDays(today, -8) },
+    { title: 'Editor tarjeta: layout dos columnas', schedule_start_date: BoardCore.addDays(today, -6), schedule_end_date: BoardCore.addDays(today, 6) },
+    { title: 'Demo: notas markdown extensas', schedule_start_date: BoardCore.addDays(today, -2), schedule_end_date: BoardCore.addDays(today, 4) },
+    { title: 'Actualizar skill kuiper-kanban', schedule_start_date: BoardCore.addDays(today, 8), schedule_end_date: BoardCore.addDays(today, 22) },
+    { title: 'Definir stack inicial open-medical', schedule_start_date: BoardCore.addDays(today, 10), schedule_end_date: BoardCore.addDays(today, 24) },
+    { title: 'Modelo de roles médicos', schedule_start_date: null, schedule_end_date: BoardCore.addDays(today, 38) },
+    { title: 'Integrar vídeos landing', schedule_start_date: BoardCore.addDays(today, 14), schedule_end_date: BoardCore.addDays(today, 34) },
+    { title: 'Refactor tablas admin en móvil', schedule_start_date: BoardCore.addDays(today, 20), schedule_end_date: BoardCore.addDays(today, 40) },
+    { title: 'Formulario contacto: spam checks', schedule_start_date: BoardCore.addDays(today, 32), schedule_end_date: BoardCore.addDays(today, 52) },
+    { title: 'Export CSV inscritos evento', schedule_start_date: null, schedule_end_date: BoardCore.addDays(today, 48) },
+  ];
+  let updated = 0;
+  for (const spec of specs) {
+    const id = cardIdByTitle(db, boardId, spec.title);
+    if (!id) continue;
+    cards.update(db, id, {
+      schedule_start_date: spec.schedule_start_date,
+      schedule_end_date: spec.schedule_end_date,
+    });
+    updated += 1;
+  }
+  return updated;
 }
 
 function ensureCardNotes(db, boardId, projectId, title, fields = {}) {
@@ -327,6 +373,26 @@ function cmdSeed(args, opts) {
       },
     ];
 
+    const today = BoardCore.ymd();
+    const scheduleFor = title => {
+      const map = {
+        'Optimizar raster Mermaid en PDF': { schedule_start_date: BoardCore.addDays(today, -45), schedule_end_date: BoardCore.addDays(today, -38) },
+        'Documentar deploy interno': { schedule_start_date: BoardCore.addDays(today, -36), schedule_end_date: BoardCore.addDays(today, -30) },
+        'Implementar MCP kuiper-kanban': { schedule_start_date: BoardCore.addDays(today, -28), schedule_end_date: BoardCore.addDays(today, -18) },
+        'Revisar tests API navigation': { schedule_start_date: BoardCore.addDays(today, -16), schedule_end_date: BoardCore.addDays(today, -8) },
+        'Editor tarjeta: layout dos columnas': { schedule_start_date: BoardCore.addDays(today, -6), schedule_end_date: BoardCore.addDays(today, 6) },
+        'Demo: notas markdown extensas': { schedule_start_date: BoardCore.addDays(today, -2), schedule_end_date: BoardCore.addDays(today, 4) },
+        'Actualizar skill kuiper-kanban': { schedule_start_date: BoardCore.addDays(today, 8), schedule_end_date: BoardCore.addDays(today, 22) },
+        'Definir stack inicial open-medical': { schedule_start_date: BoardCore.addDays(today, 10), schedule_end_date: BoardCore.addDays(today, 24) },
+        'Modelo de roles médicos': { schedule_start_date: null, schedule_end_date: BoardCore.addDays(today, 38) },
+        'Integrar vídeos landing': { schedule_start_date: BoardCore.addDays(today, 14), schedule_end_date: BoardCore.addDays(today, 34) },
+        'Refactor tablas admin en móvil': { schedule_start_date: BoardCore.addDays(today, 20), schedule_end_date: BoardCore.addDays(today, 40) },
+        'Formulario contacto: spam checks': { schedule_start_date: BoardCore.addDays(today, 32), schedule_end_date: BoardCore.addDays(today, 52) },
+        'Export CSV inscritos evento': { schedule_start_date: null, schedule_end_date: BoardCore.addDays(today, 48) },
+      };
+      return map[title] || {};
+    };
+
     let added = 0;
     demoCards.forEach(spec => {
       const title = spec.title;
@@ -336,6 +402,7 @@ function cmdSeed(args, opts) {
         epic_id: spec.epic_id || null,
         priority: spec.priority != null ? spec.priority : 0,
         flagged: !!spec.flagged,
+        ...scheduleFor(title),
       };
       if (title === 'Demo: notas markdown extensas') {
         const result = ensureCardNotes(db, board.id, spec.project_id, title, fields);
@@ -345,16 +412,29 @@ function cmdSeed(args, opts) {
       if (ensureCard(db, board.id, spec.project_id, title, fields)) added += 1;
     });
 
+    const schedules = backfillDemoSchedules(db, board.id);
+    ensureBlocksLink(db, board.id, 'Optimizar raster Mermaid en PDF', 'Documentar deploy interno');
+    ensureBlocksLink(db, board.id, 'Optimizar raster Mermaid en PDF', 'Implementar MCP kuiper-kanban');
+    ensureBlocksLink(db, board.id, 'Implementar MCP kuiper-kanban', 'Revisar tests API navigation');
+    ensureBlocksLink(db, board.id, 'Implementar MCP kuiper-kanban', 'Editor tarjeta: layout dos columnas');
+    ensureBlocksLink(db, board.id, 'Editor tarjeta: layout dos columnas', 'Actualizar skill kuiper-kanban');
+    ensureBlocksLink(db, board.id, 'Editor tarjeta: layout dos columnas', 'Integrar vídeos landing');
+    ensureBlocksLink(db, board.id, 'Definir stack inicial open-medical', 'Modelo de roles médicos');
+    ensureBlocksLink(db, board.id, 'Integrar vídeos landing', 'Formulario contacto: spam checks');
+    ensureBlocksLink(db, board.id, 'Refactor tablas admin en móvil', 'Export CSV inscritos evento');
+    ensureBlocksLink(db, board.id, 'Formulario contacto: spam checks', 'Actualizar skill kuiper-kanban');
+
     const snapshot = boards.getSnapshot(db, board.slug);
     if (opts.json) {
       return printOk({
         seeded: true,
         board: snapshot.board,
         cards_added: added,
+        schedules_updated: schedules,
         cards_total: snapshot.cards.filter(c => !c.archived).length,
       }, { command: 'db seed' });
     }
-    console.log(`seed ok · board "${board.slug}" · +${added} cards (${snapshot.cards.filter(c => !c.archived).length} total)`);
+    console.log(`seed ok · board "${board.slug}" · +${added} cards · ${schedules} schedules (${snapshot.cards.filter(c => !c.archived).length} total)`);
     return 0;
   });
 }

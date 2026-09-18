@@ -1,0 +1,303 @@
+/* src/styles/gantt.css */
+
+/* ─── Design tokens ──────────────────────────────────────────────────────── */
+:root {
+	--gantt-font: "Inter", "Segoe UI", system-ui, sans-serif;
+
+	/* Bar colours */
+	--gantt-task: #4c6ef5;
+	--gantt-project: #2ecc97;
+	--gantt-milestone: #9b59b6;
+	--gantt-selection: #ff6b35;
+	--gantt-selection-ring: rgba(255, 107, 53, 0.32);
+	--gantt-selection-glow: rgba(255, 107, 53, 0.16);
+
+	/* Connector colours */
+	--gantt-link: #adb5bd;
+	--gantt-link-hi: #ff6b35;
+
+	/* Structure */
+	--gantt-row-height: 44px;
+	--gantt-bar-height: 28px;
+	--gantt-milestone-size: 20px;
+	--gantt-bg: #fff;
+	--gantt-header-bg: #f8f9fa;
+	--gantt-stripe: #fafbfc;
+	--gantt-border: #e9ecef;
+	--gantt-grid-line: #f1f3f5;
+
+	/* Container framing */
+	--gantt-container-border-radius: 6px;
+	--gantt-container-border: 1px solid var(--gantt-border);
+	--gantt-container-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+	--gantt-today: rgba(255, 107, 53, 0.35);
+	--gantt-row-selected: #edf2ff;
+	--gantt-day-weekend: rgba(73, 80, 87, 0.06);
+	--gantt-day-holiday: rgba(250, 82, 82, 0.1);
+	--gantt-day-custom: rgba(34, 139, 230, 0.1);
+
+	/* Typography scale */
+	--gantt-font-size-xs: 11px;
+	--gantt-font-size-sm: 12px;
+	--gantt-font-size-md: 13px;
+	--gantt-font-size-lg: 16px;
+	--gantt-font-weight-normal: 400;
+	--gantt-font-weight-semibold: 600;
+	--gantt-font-weight-bold: 700;
+	--gantt-letter-spacing-tight: 0.04em;
+	--gantt-letter-spacing-wide: 0.05em;
+
+	/* Text */
+	--gantt-text: #212529;
+	--gantt-text-secondary: #868e96;
+	--gantt-bar-label-color: #fff;
+}
+
+/* ─── Root container framing ─────────────────────────────────────────────── */
+.gantt-root {
+	border: var(--gantt-container-border);
+	border-radius: var(--gantt-container-border-radius);
+	box-shadow: var(--gantt-container-shadow);
+}
+
+/* ─── Dark mode (explicit data-theme attribute) ──────────────────────────── */
+[data-theme="dark"] {
+	--gantt-bg: #1a1b23;
+	--gantt-header-bg: #212231;
+	--gantt-stripe: #1e1f2a;
+	--gantt-border: #2d3044;
+	--gantt-grid-line: #252738;
+	--gantt-text: #e2e4e9;
+	--gantt-text-secondary: #8b8fa3;
+	--gantt-container-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+	--gantt-today: rgba(255, 107, 53, 0.45);
+	--gantt-row-selected: #252844;
+	--gantt-day-weekend: rgba(73, 80, 87, 0.15);
+	--gantt-day-holiday: rgba(250, 82, 82, 0.15);
+	--gantt-day-custom: rgba(34, 139, 230, 0.15);
+	--gantt-link: #4a4d66;
+	--gantt-bar-label-color: #e2e4e9;
+}
+
+/* ─── Dark mode (prefers-color-scheme fallback for system theme) ─────────── */
+@media (prefers-color-scheme: dark) {
+	[data-theme="system"] {
+		--gantt-bg: #1a1b23;
+		--gantt-header-bg: #212231;
+		--gantt-stripe: #1e1f2a;
+		--gantt-border: #2d3044;
+		--gantt-grid-line: #252738;
+		--gantt-text: #e2e4e9;
+		--gantt-text-secondary: #8b8fa3;
+		--gantt-container-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+		--gantt-today: rgba(255, 107, 53, 0.45);
+		--gantt-row-selected: #252844;
+		--gantt-day-weekend: rgba(73, 80, 87, 0.15);
+		--gantt-day-holiday: rgba(250, 82, 82, 0.15);
+		--gantt-day-custom: rgba(34, 139, 230, 0.15);
+		--gantt-link: #4a4d66;
+		--gantt-bar-label-color: #e2e4e9;
+	}
+}
+
+/* ─── Bar states ─────────────────────────────────────────────────────────── */
+.gantt-bar {
+	transition:
+		filter 0.1s ease,
+		transform 0.05s ease;
+	will-change: transform;
+}
+
+.gantt-bar:hover {
+	filter: brightness(1.07);
+}
+
+.gantt-bar:active,
+.gantt-bar--selected {
+	filter: brightness(1.1);
+}
+
+.gantt-shape--selected {
+	box-shadow:
+		0 0 0 1px var(--gantt-selection-ring),
+		0 1px 4px var(--gantt-selection-glow);
+}
+
+.gantt-bar--selected span {
+	text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+}
+
+.gantt-resize-handle:hover {
+	background: rgba(255, 255, 255, 0.35);
+}
+
+/* ─── Milestone ──────────────────────────────────────────────────────────── */
+.gantt-milestone {
+	transition:
+		transform 0.1s ease,
+		filter 0.1s ease;
+}
+
+.gantt-milestone:hover {
+	filter: brightness(1.12);
+	transform: rotate(45deg) scale(1.1) !important;
+}
+
+/* ─── Row affordances (toggle + add) ─────────────────────────────────────── */
+.gantt-toggle,
+.gantt-add-btn {
+	opacity: 0.4;
+	transition:
+		opacity 0.15s ease,
+		color 0.1s ease,
+		background 0.15s ease;
+	border-radius: 3px;
+}
+
+.gantt-row:hover .gantt-toggle,
+.gantt-row:hover .gantt-add-btn {
+	opacity: 1;
+}
+
+.gantt-toggle:hover,
+.gantt-add-btn:hover {
+	opacity: 1 !important;
+	color: var(--gantt-task) !important;
+	background: var(--gantt-row-selected) !important;
+}
+
+.gantt-toggle:focus-visible,
+.gantt-add-btn:focus-visible {
+	opacity: 1;
+	color: var(--gantt-task) !important;
+	background: var(--gantt-row-selected) !important;
+	outline: 2px solid var(--gantt-task);
+	outline-offset: 1px;
+}
+
+/* ─── Header expand / collapse all buttons ────────────────────────────────── */
+.gantt-header-expand-btn,
+.gantt-header-collapse-btn {
+	transition:
+		color 0.1s ease,
+		background 0.15s ease,
+		border-color 0.15s ease;
+}
+
+.gantt-header-expand-btn:hover,
+.gantt-header-collapse-btn:hover {
+	color: var(--gantt-task) !important;
+	border-color: var(--gantt-task) !important;
+}
+
+.gantt-header-expand-btn:focus-visible,
+.gantt-header-collapse-btn:focus-visible {
+	color: var(--gantt-task) !important;
+	border-color: var(--gantt-task) !important;
+	outline: 2px solid var(--gantt-task);
+	outline-offset: 1px;
+}
+
+/* ─── Scrollbar styling (webkit) ─────────────────────────────────────────── */
+.gantt-root ::-webkit-scrollbar {
+	width: 8px;
+	height: 8px;
+}
+.gantt-root ::-webkit-scrollbar-track {
+	background: var(--gantt-header-bg);
+}
+.gantt-root ::-webkit-scrollbar-thumb {
+	background: #ced4da;
+	border-radius: 4px;
+}
+.gantt-root ::-webkit-scrollbar-thumb:hover {
+	background: #adb5bd;
+}
+
+/* ─── Timeline day backgrounds ──────────────────────────────────────────── */
+.gantt-day-cell--weekend {
+	background: var(--gantt-day-weekend);
+}
+
+.gantt-day-cell--holiday {
+	background: var(--gantt-day-holiday);
+}
+
+.gantt-day-cell--custom {
+	background: var(--gantt-day-custom);
+}
+
+/* ─── Timeline header special-day indicators ────────────────────────────── */
+.gantt-header-cell--weekend::after,
+.gantt-header-cell--holiday::after,
+.gantt-header-cell--custom::after {
+	content: "";
+	position: absolute;
+	top: 4px;
+	right: 4px;
+	width: 5px;
+	height: 5px;
+	border-radius: 50%;
+}
+
+.gantt-header-cell--weekend::after {
+	background: var(--gantt-day-weekend);
+}
+
+.gantt-header-cell--holiday::after {
+	background: var(--gantt-day-holiday);
+}
+
+.gantt-header-cell--custom::after {
+	background: var(--gantt-day-custom);
+}
+
+/* ─── Splitter handle ───────────────────────────────────────────────────── */
+.gantt-splitter-handle {
+	transition: background 0.15s ease;
+}
+
+.gantt-splitter-handle:hover {
+	background: var(--gantt-task) !important;
+}
+
+/* ─── Column resize handle ──────────────────────────────────────────────── */
+.gantt-col-resize-handle {
+	transition: background 0.15s ease;
+}
+
+.gantt-col-resize-handle:hover {
+	background: var(--gantt-task) !important;
+}
+
+/* ─── Link-creation endpoint handles ─────────────────────────────────────── */
+.gantt-link-endpoint:hover {
+	opacity: 1 !important;
+	transform: translate(-50%, -50%) scale(1.4) !important;
+	background: var(--gantt-link-hi) !important;
+	box-shadow: 0 0 0 2px var(--gantt-selection-ring);
+}
+
+.gantt-link-endpoint:focus-visible {
+	opacity: 1;
+	transform: translate(-50%, -50%) scale(1) !important;
+	outline: 2px solid var(--gantt-task);
+	outline-offset: 2px;
+}
+
+/* ─── Tooltip ───────────────────────────────────────────────────────────── */
+.gantt-tooltip {
+	position: fixed;
+	z-index: 100;
+	background: var(--gantt-bg);
+	border: 1px solid var(--gantt-border);
+	border-radius: 4px;
+	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+	padding: 8px 12px;
+	font-size: var(--gantt-font-size-sm);
+	color: var(--gantt-text);
+	pointer-events: none;
+	max-width: 260px;
+	white-space: normal;
+	overflow-wrap: break-word;
+}

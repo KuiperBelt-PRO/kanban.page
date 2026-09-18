@@ -2,18 +2,44 @@
   "name": "kanban.page",
   "version": "1.0.0",
   "description": "Headless CLI for a synced kanban.page board — so an agent can read and edit it without driving a browser.",
-  "bin": { "kanban": "cli/kanban.js" },
+  "bin": {
+    "kanban": "cli/kanban.js"
+  },
   "main": "core.js",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "dependencies": {
     "better-sqlite3": "^11.9.1"
   },
-  "files": ["cli/", "core.js", "server/", "migrations/", "docs/cli.md", "docs/agents.md", "README.md", "LICENSE"],
+  "files": [
+    "cli/",
+    "core.js",
+    "server/",
+    "migrations/",
+    "docs/cli.md",
+    "docs/agents.md",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "test": "node --test tests/core.test.js tests/cli.test.js tests/db.test.js tests/kuiper-cli.test.js tests/api.test.js"
   },
-  "repository": { "type": "git", "url": "git+https://github.com/brainforwarding/kanban.page.git" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/brainforwarding/kanban.page.git"
+  },
   "homepage": "https://kanban.page",
   "license": "MIT",
-  "keywords": ["kanban", "cli", "agent", "local-first", "end-to-end-encrypted"]
+  "keywords": [
+    "kanban",
+    "cli",
+    "agent",
+    "local-first",
+    "end-to-end-encrypted"
+  ],
+  "devDependencies": {
+    "gantt-renderer": "^0.12.25",
+    "gantt-schedule-timeline-calendar": "^3.43.14"
+  }
 }

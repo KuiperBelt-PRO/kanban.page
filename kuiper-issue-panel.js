@@ -103,6 +103,8 @@ const KuiperIssuePanel = (() => {
     if (!t) return;
     t.tags = (detail.tags || []).map(x => x.name);
     t.estimatedMinutes = detail.card?.estimated_minutes ?? null;
+    t.scheduleStartDate = detail.card?.schedule_start_date ?? null;
+    t.scheduleEndDate = detail.card?.schedule_end_date ?? null;
     t.blockedBy = (detail.links?.blockedBy || []).map(l => ({
       id: l.id, title: l.title, linkId: l.link_id,
     }));
@@ -144,6 +146,26 @@ const KuiperIssuePanel = (() => {
     extras.id = 'kuiperIssueAsideExtras';
     extras.className = 'kuiper-issue-aside-extras';
     extras.innerHTML = `
+      <div class="kuiper-aside-group">
+        <div class="kuiper-ed-field kuiper-schedule-field" id="kuiperEdScheduleField">
+          <span class="kuiper-ed-lbl" data-i18n="scheduleSection"></span>
+          <div class="kuiper-time-dt-row">
+            <span class="kuiper-time-dt-lbl" data-i18n="scheduleStart"></span>
+            <button type="button" class="kuiper-dt-trigger" id="kuiperScheduleStartBtn" data-placeholder="—">
+              <span class="kuiper-dt-trigger-val"></span>
+            </button>
+            <input type="hidden" id="kuiperScheduleStart">
+          </div>
+          <div class="kuiper-time-dt-row">
+            <span class="kuiper-time-dt-lbl" data-i18n="scheduleEnd"></span>
+            <button type="button" class="kuiper-dt-trigger" id="kuiperScheduleEndBtn" data-placeholder="—">
+              <span class="kuiper-dt-trigger-val"></span>
+            </button>
+            <input type="hidden" id="kuiperScheduleEnd">
+          </div>
+          <p class="kuiper-schedule-error" id="kuiperScheduleError" hidden></p>
+        </div>
+      </div>
       <div class="kuiper-aside-group">
         <div class="kuiper-ed-field" id="kuiperEdTagsField">
           <span class="kuiper-ed-lbl" data-i18n="tags"></span>
@@ -325,6 +347,8 @@ const KuiperIssuePanel = (() => {
       setTimeout(() => document.getElementById('kuiperTagSuggest')?.setAttribute('hidden', ''), 120);
     });
     document.getElementById('kuiperEstimateInput')?.addEventListener('change', onEstimateChange);
+    document.getElementById('kuiperScheduleStartBtn')?.addEventListener('click', e => openSchedulePicker('kuiperScheduleStart', e));
+    document.getElementById('kuiperScheduleEndBtn')?.addEventListener('click', e => openSchedulePicker('kuiperScheduleEnd', e));
     document.getElementById('kuiperManualAdd')?.addEventListener('click', logManualTime);
     document.getElementById('kuiperTimerStart')?.addEventListener('click', startTimer);
     document.getElementById('kuiperTimerStop')?.addEventListener('click', stopTimer);
@@ -436,6 +460,79 @@ const KuiperIssuePanel = (() => {
     const m = String(d.getMonth() + 1).padStart(2, '0');
     const day = String(d.getDate()).padStart(2, '0');
     return `${y}-${m}-${day}`;
+  }
+
+  function formatScheduleLabel(ymd) {
+    if (!ymd) return '—';
+    const d = new Date(`${ymd}T12:00:00Z`);
+    const loc = ctx.locale?.() === 'es' ? 'es-ES' : 'en-GB';
+    return d.toLocaleDateString(loc, { day: 'numeric', month: 'short', year: 'numeric' });
+  }
+
+  function readScheduleField(hiddenId) {
+    const v = document.getElementById(hiddenId)?.value?.trim();
+    return v || null;
+  }
+
+  function renderSchedule() {
+    const start = detail?.card?.schedule_start_date ?? readScheduleField('kuiperScheduleStart');
+    const end = detail?.card?.schedule_end_date ?? readScheduleField('kuiperScheduleEnd');
+    const startHidden = document.getElementById('kuiperScheduleStart');
+    const endHidden = document.getElementById('kuiperScheduleEnd');
+    if (startHidden) startHidden.value = start || '';
+    if (endHidden) endHidden.value = end || '';
+    const startBtn = document.getElementById('kuiperScheduleStartBtn');
+    const endBtn = document.getElementById('kuiperScheduleEndBtn');
+    if (startBtn) startBtn.querySelector('.kuiper-dt-trigger-val').textContent = formatScheduleLabel(start);
+    if (endBtn) endBtn.querySelector('.kuiper-dt-trigger-val').textContent = formatScheduleLabel(end);
+    const err = document.getElementById('kuiperScheduleError');
+    if (err) err.hidden = true;
+  }
+
+  function openSchedulePicker(hiddenId, e) {
+    const hidden = document.getElementById(hiddenId);
+    const btn = hiddenId === 'kuiperScheduleStart'
+      ? document.getElementById('kuiperScheduleStartBtn')
+      : document.getElementById('kuiperScheduleEndBtn');
+    if (!hidden || !btn || typeof KuiperDateTimePicker === 'undefined') return;
+    KuiperDateTimePicker.openDate({
+      anchor: btn,
+      value: hidden.value || localYmd(),
+      clientX: e.clientX,
+      clientY: e.clientY,
+      onPick: ymd => {
+        hidden.value = ymd;
+        btn.querySelector('.kuiper-dt-trigger-val').textContent = formatScheduleLabel(ymd);
+        const err = document.getElementById('kuiperScheduleError');
+        const check = BoardCore.validateSchedule(readScheduleField('kuiperScheduleStart'), readScheduleField('kuiperScheduleEnd'));
+        if (!check.ok && err) {
+          err.hidden = false;
+          err.textContent = tr('scheduleInvalidRange');
+        } else if (err) err.hidden = true;
+      },
+    });
+  }
+
+  function syncDraft(draft) {
+    if (!draft) return;
+    draft.scheduleStartDate = readScheduleField('kuiperScheduleStart');
+    draft.scheduleEndDate = readScheduleField('kuiperScheduleEnd');
+  }
+
+  function validateScheduleDraft(draft) {
+    const check = BoardCore.validateSchedule(draft.scheduleStartDate, draft.scheduleEndDate);
+    const err = document.getElementById('kuiperScheduleError');
+    if (!check.ok) {
+      if (err) {
+        err.hidden = false;
+        err.textContent = tr('scheduleInvalidRange');
+      }
+      return false;
+    }
+    if (err) err.hidden = true;
+    draft.scheduleStartDate = check.scheduleStartDate;
+    draft.scheduleEndDate = check.scheduleEndDate;
+    return true;
   }
 
   async function onEstimateChange() {
@@ -1412,6 +1509,7 @@ const KuiperIssuePanel = (() => {
         if (p.epic_id != null) return tr('histEpicChanged');
         return tr('histUpdated');
       case 'estimated_changed': return tr('histEstimateChanged', { value: formatMinutes(p.estimated_minutes) });
+      case 'schedule_changed': return tr('histScheduleChanged');
       case 'tags_changed': return tr('histTagsChanged', { value: (p.tags || []).join(', ') });
       case 'comment_added': return tr('histCommentAdded');
       case 'comment_updated': return tr('histCommentUpdated');
@@ -1479,6 +1577,7 @@ const KuiperIssuePanel = (() => {
 
   function renderAll() {
     if (!panelReady) return;
+    renderSchedule();
     renderTags();
     renderEstimate();
     renderCardPicker();
@@ -1523,7 +1622,11 @@ const KuiperIssuePanel = (() => {
     currentCardId = cardId;
     if (cardId === 'new') {
       detail = {
-        card: { estimated_minutes: draft?.estimatedMinutes ?? null },
+        card: {
+          estimated_minutes: draft?.estimatedMinutes ?? null,
+          schedule_start_date: draft?.scheduleStartDate ?? null,
+          schedule_end_date: draft?.scheduleEndDate ?? null,
+        },
         tags: (draft?.tags || []).map(n => ({ name: n })),
         boardTags: ctx.state?.()?._kuiper?.boardTags || [],
         links: { blockedBy: [], blocks: [], related: [] },
@@ -1564,6 +1667,12 @@ const KuiperIssuePanel = (() => {
     if ((prev.estimatedMinutes ?? null) !== (t.estimatedMinutes ?? null)) {
       patch.estimated_minutes = t.estimatedMinutes ?? null;
     }
+    if ((prev.scheduleStartDate ?? null) !== (t.scheduleStartDate ?? null)) {
+      patch.schedule_start_date = t.scheduleStartDate ?? null;
+    }
+    if ((prev.scheduleEndDate ?? null) !== (t.scheduleEndDate ?? null)) {
+      patch.schedule_end_date = t.scheduleEndDate ?? null;
+    }
     return patch;
   }
 
@@ -1577,6 +1686,8 @@ const KuiperIssuePanel = (() => {
     onEditorOpen,
     onEditorClose,
     patchFromTask,
+    syncDraft,
+    validateScheduleDraft,
     reloadDetail,
     i18nPanel,
   };

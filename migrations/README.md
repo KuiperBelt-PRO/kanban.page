@@ -14,3 +14,4 @@ Cada fichero `NNN_*.sql` se ejecuta una sola vez y se registra en `schema_migrat
 | 2 | `002_card_priority.sql` | Columna `cards.priority` (0–4) |
 | 3 | `003_project_code_issue_number.sql` | Código de proyecto (`code`) e ID de issue incremental (`PROJ-1`) |
 | 4 | `004_card_collaboration.sql` | Tags, enlaces, tiempo, comentarios y estimación |
+| 5 | `005_card_schedule.sql` | Fechas de planificación (`schedule_start_date` / `schedule_end_date`) |

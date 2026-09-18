@@ -55,6 +55,9 @@ DOM: abrir `tests/dom.test.html` en Chrome (`?ns=test`). Ver [`README.md`](READM
 | SQLite, API, serve | [`docs/specs/kuiper-platform.md`](docs/specs/kuiper-platform.md) |
 | Swimlanes, tarjetas, filtros | [`docs/specs/kuiper-board-ui.md`](docs/specs/kuiper-board-ui.md) |
 | Editor, crear tarea, colaboración | [`docs/specs/kuiper-editor.md`](docs/specs/kuiper-editor.md) |
+| Fechas de planificación en issues | [`docs/specs/kuiper-issue-schedule.md`](docs/specs/kuiper-issue-schedule.md) |
+| Vista Calendario | [`docs/specs/kuiper-calendar-view.md`](docs/specs/kuiper-calendar-view.md) |
+| Vista Gantt | [`docs/specs/kuiper-gantt-view.md`](docs/specs/kuiper-gantt-view.md) |
 | Tokens y componentes UI | [`docs/design-system.md`](docs/design-system.md) |
 | Sync relay (detalle) | [`docs/sync.md`](docs/sync.md) |
 | CLI headless | [`docs/cli.md`](docs/cli.md) |

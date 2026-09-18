@@ -37,6 +37,8 @@ function rowToCard(row) {
     archived: intToBool(row.archived),
     priority: row.priority != null ? row.priority : 0,
     estimated_minutes: row.estimated_minutes != null ? row.estimated_minutes : null,
+    schedule_start_date: row.schedule_start_date || null,
+    schedule_end_date: row.schedule_end_date || null,
     created_at: row.created_at,
     updated_at: row.updated_at,
   };

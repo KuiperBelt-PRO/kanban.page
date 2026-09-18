@@ -1054,6 +1054,251 @@ const BoardCore = (() => {
     };
   }
 
+  /* ── issue schedule (calendar / gantt) ───────────────── */
+
+  const YMD_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+  function isScheduleYmd(value) {
+    return YMD_RE.test(String(value || ''));
+  }
+
+  function validateSchedule(start, end) {
+    const s = start || null;
+    const e = end || null;
+    if (s && !isScheduleYmd(s)) return { ok: false, code: 'invalid_format' };
+    if (e && !isScheduleYmd(e)) return { ok: false, code: 'invalid_format' };
+    if (s && e && s > e) return { ok: false, code: 'invalid_range' };
+    return { ok: true, scheduleStartDate: s, scheduleEndDate: e };
+  }
+
+  function normalizeSchedulePatch({ start, end }) {
+    return validateSchedule(start ?? null, end ?? null);
+  }
+
+  function scheduleSpanDays(start, end) {
+    if (!start || !end || !isScheduleYmd(start) || !isScheduleYmd(end) || start > end) return 0;
+    const [y1, m1, d1] = start.split('-').map(Number);
+    const [y2, m2, d2] = end.split('-').map(Number);
+    const a = Date.UTC(y1, m1 - 1, d1);
+    const b = Date.UTC(y2, m2 - 1, d2);
+    return Math.floor((b - a) / 86400000) + 1;
+  }
+
+  function issueOnDay(issue, day) {
+    const start = issue.scheduleStartDate || null;
+    const end = issue.scheduleEndDate || null;
+    if (start && end) return day >= start && day <= end;
+    if (start) return day === start;
+    if (end) return day === end;
+    return false;
+  }
+
+  function issueIntersectsRange(issue, from, to) {
+    if (!from || !to) return false;
+    const start = issue.scheduleStartDate || issue.scheduleEndDate;
+    const end = issue.scheduleEndDate || issue.scheduleStartDate;
+    if (!start && !end) return false;
+    const a = start || end;
+    const b = end || start;
+    return a <= to && b >= from;
+  }
+
+  function scheduleSortKey(issue) {
+    return issue.scheduleStartDate || issue.scheduleEndDate || null;
+  }
+
+  /** Min/max schedule dates across issues with any schedule field set. */
+  function scheduleBoundsForTasks(tasks) {
+    let start = null;
+    let end = null;
+    for (const t of tasks || []) {
+      const s = t.scheduleStartDate || t.scheduleEndDate;
+      const e = t.scheduleEndDate || t.scheduleStartDate;
+      if (!s && !e) continue;
+      const a = s || e;
+      const b = e || s;
+      if (!start || a < start) start = a;
+      if (!end || b > end) end = b;
+    }
+    if (!start || !end) return null;
+    return { start, end };
+  }
+
+  function applyScheduleDelta(issue, deltaDays) {
+    const d = Number(deltaDays) || 0;
+    const start = issue.scheduleStartDate || null;
+    const end = issue.scheduleEndDate || null;
+    if (!d || (!start && !end)) {
+      return { scheduleStartDate: start, scheduleEndDate: end };
+    }
+    return {
+      scheduleStartDate: start ? addDays(start, d) : null,
+      scheduleEndDate: end ? addDays(end, d) : null,
+    };
+  }
+
+  function moveScheduleByDays(issue, deltaDays) {
+    return applyScheduleDelta(issue, deltaDays);
+  }
+
+  function calendarMonthGrid(anchorDate) {
+    const anchor = isScheduleYmd(anchorDate) ? anchorDate : ymd();
+    const [y, mo] = anchor.split('-').map(Number);
+    const first = new Date(Date.UTC(y, mo - 1, 1));
+    const startPad = (first.getUTCDay() + 6) % 7;
+    const daysInMonth = new Date(Date.UTC(y, mo, 0)).getUTCDate();
+    const cells = [];
+    for (let i = 0; i < startPad; i++) cells.push(null);
+    for (let d = 1; d <= daysInMonth; d++) cells.push(toYmdUtc(y, mo, d));
+    while (cells.length % 7 !== 0) cells.push(null);
+    const weeks = [];
+    for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
+    return { year: y, month: mo, weeks };
+  }
+
+  function toYmdUtc(y, mo, d) {
+    return `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+  }
+
+  function calendarWeekDays(anchorDate) {
+    const anchor = isScheduleYmd(anchorDate) ? anchorDate : ymd();
+    const monday = mondayOf(anchor);
+    const days = [];
+    for (let i = 0; i < 7; i++) days.push(addDays(monday, i));
+    return days;
+  }
+
+  function issuesForDay(tasks, day) {
+    return tasks
+      .filter(t => issueOnDay(t, day))
+      .sort((a, b) => (b.priority || 0) - (a.priority || 0)
+        || String(scheduleSortKey(a) || '').localeCompare(String(scheduleSortKey(b) || ''))
+        || String(a.id).localeCompare(String(b.id)));
+  }
+
+  function spanWeekRows(issue, weekDays) {
+    if (!weekDays?.length) return null;
+    const start = issue.scheduleStartDate;
+    const end = issue.scheduleEndDate || issue.scheduleStartDate;
+    if (!start && !end) return null;
+    const a = start || end;
+    const b = end || start;
+    let from = -1;
+    let to = -1;
+    weekDays.forEach((day, idx) => {
+      if (!day) return;
+      if (day >= a && day <= b) {
+        if (from < 0) from = idx;
+        to = idx;
+      }
+    });
+    if (from < 0) return null;
+    return { from, to, span: to - from + 1 };
+  }
+
+  function buildBlockingGraph(tasks) {
+    const graph = new Map();
+    const ensure = id => {
+      if (!graph.has(id)) graph.set(id, new Set());
+      return graph.get(id);
+    };
+    for (const t of tasks || []) {
+      ensure(t.id);
+      for (const l of t.blocks || []) ensure(t.id).add(l.id);
+      for (const l of t.blockedBy || []) ensure(l.id).add(t.id);
+    }
+    return graph;
+  }
+
+  function blockingSuccessors(graph, rootId) {
+    const out = new Set();
+    const stack = [...(graph.get(rootId) || [])];
+    while (stack.length) {
+      const id = stack.pop();
+      if (out.has(id)) continue;
+      out.add(id);
+      for (const next of graph.get(id) || []) stack.push(next);
+    }
+    return [...out];
+  }
+
+  function detectBlockingCycle(graph) {
+    const visiting = new Set();
+    const done = new Set();
+    function dfs(id) {
+      if (done.has(id)) return false;
+      if (visiting.has(id)) return true;
+      visiting.add(id);
+      for (const next of graph.get(id) || []) {
+        if (dfs(next)) return true;
+      }
+      visiting.delete(id);
+      done.add(id);
+      return false;
+    }
+    for (const id of graph.keys()) {
+      if (dfs(id)) return true;
+    }
+    return false;
+  }
+
+  function minDeltaForFinishToStart(predEnd, succStart) {
+    if (!predEnd || !succStart || predEnd < succStart) return 0;
+    let d = 0;
+    while (addDays(succStart, d) <= predEnd) d += 1;
+    return d;
+  }
+
+  function cascadeScheduleMove(tasks, graph, rootId, deltaDays) {
+    const byId = new Map((tasks || []).map(t => [t.id, t]));
+    const root = byId.get(rootId);
+    if (!root) return { patches: [], cycle: false };
+    const cycle = detectBlockingCycle(graph);
+    const ids = cycle ? [rootId] : [rootId, ...blockingSuccessors(graph, rootId)];
+    const patches = [];
+    for (const id of ids) {
+      const t = byId.get(id);
+      if (!t || (!t.scheduleStartDate && !t.scheduleEndDate)) continue;
+      const next = applyScheduleDelta(t, deltaDays);
+      patches.push({
+        id,
+        schedule_start_date: next.scheduleStartDate,
+        schedule_end_date: next.scheduleEndDate,
+      });
+    }
+    return { patches, cycle };
+  }
+
+  function cascadeAfterResizeEnd(tasks, graph, predId, newPredEnd) {
+    const byId = new Map((tasks || []).map(t => [t.id, t]));
+    const pred = byId.get(predId);
+    if (!pred || !newPredEnd) return { patches: [], cycle: false };
+    const direct = [...(graph.get(predId) || [])];
+    let maxDelta = 0;
+    for (const sid of direct) {
+      const succ = byId.get(sid);
+      if (!succ?.scheduleStartDate) continue;
+      maxDelta = Math.max(maxDelta, minDeltaForFinishToStart(newPredEnd, succ.scheduleStartDate));
+    }
+    if (!maxDelta) return { patches: [{ id: predId, schedule_start_date: pred.scheduleStartDate, schedule_end_date: newPredEnd }], cycle: false };
+    const move = cascadeScheduleMove(tasks, graph, predId, maxDelta);
+    const patches = move.patches.filter(p => p.id !== predId);
+    patches.unshift({
+      id: predId,
+      schedule_start_date: pred.scheduleStartDate,
+      schedule_end_date: newPredEnd,
+    });
+    return { patches, cycle: move.cycle };
+  }
+
+  function daysBetweenInclusive(start, end) {
+    return scheduleSpanDays(start, end);
+  }
+
+  function compareYmd(a, b) {
+    return String(a || '').localeCompare(String(b || ''));
+  }
+
   /** Parse human duration (30m, 1h 25m, 8h). Minutes minimum; no days. Returns null if invalid. */
   function parseDuration(text) {
     const raw = String(text || '').trim();
@@ -1111,6 +1356,13 @@ const BoardCore = (() => {
     mtOf, pmtOf, existMtOf, clockMax, canon, stampChanges, syncable, validateSyncable, SYNC_V, merge, unionFloor,
     randomSecret, deriveSync, seal, unseal, bytesToB64u, b64uToBytes,
     parseDuration, formatDurationShort,
+    isScheduleYmd, validateSchedule, normalizeSchedulePatch, scheduleSpanDays,
+    issueOnDay, issueIntersectsRange, scheduleSortKey, scheduleBoundsForTasks,
+    applyScheduleDelta, moveScheduleByDays,
+    calendarMonthGrid, calendarWeekDays, issuesForDay, spanWeekRows,
+    buildBlockingGraph, blockingSuccessors, detectBlockingCycle,
+    minDeltaForFinishToStart, cascadeScheduleMove, cascadeAfterResizeEnd,
+    daysBetweenInclusive, compareYmd,
   };
 })();
 

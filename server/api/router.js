@@ -261,7 +261,8 @@ async function handleApi(req, res, db, urlPath, method) {
 const STATIC_ROOT = path.join(__dirname, '..', '..');
 const STATIC_FILES = new Set([
   'index.html', 'app.js', 'core.js', 'i18n.js', 'styles.css',
-  'kuiper-store.js', 'kuiper-datetime-picker.js', 'kuiper-issue-panel.js', 'kuiper-ui.js', 'tooltip.js',
+  'kuiper-store.js', 'kuiper-datetime-picker.js', 'kuiper-issue-panel.js', 'kuiper-ui.js',
+  'kuiper-calendar.js', 'kuiper-gantt.js', 'tooltip.js',
   'manifest.webmanifest', 'sw.js', 'qr.js',
 ]);
 
@@ -289,7 +290,7 @@ function serveStatic(req, res, urlPath) {
     res.end(KUIPER_LOCAL_SW);
     return true;
   }
-  if (!STATIC_FILES.has(safe) && !safe.startsWith('assets/')) return false;
+  if (!STATIC_FILES.has(safe) && !safe.startsWith('assets/') && !safe.startsWith('vendor/')) return false;
   const filePath = path.join(STATIC_ROOT, safe);
   if (!filePath.startsWith(STATIC_ROOT)) return false;
   try {
@@ -299,6 +300,7 @@ function serveStatic(req, res, urlPath) {
     const types = {
       '.html': 'text/html; charset=utf-8',
       '.js': 'text/javascript; charset=utf-8',
+      '.mjs': 'text/javascript; charset=utf-8',
       '.css': 'text/css; charset=utf-8',
       '.json': 'application/json',
       '.webmanifest': 'application/manifest+json',

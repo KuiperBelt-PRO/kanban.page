@@ -17,6 +17,9 @@
 | [`specs/kuiper-platform.md`](specs/kuiper-platform.md) | Modo Kuiper: SQLite, `kanban serve`, API, CLI local |
 | [`specs/kuiper-board-ui.md`](specs/kuiper-board-ui.md) | UI del tablero Kuiper: rail, swimlanes, tarjetas, filtros |
 | [`specs/kuiper-editor.md`](specs/kuiper-editor.md) | Editor de issue, colaboración, creación desde columna |
+| [`specs/kuiper-issue-schedule.md`](specs/kuiper-issue-schedule.md) | Fechas de planificación (`schedule_start_date` / `schedule_end_date`) |
+| [`specs/kuiper-calendar-view.md`](specs/kuiper-calendar-view.md) | Vista Calendario (mes/semana/día) |
+| [`specs/kuiper-gantt-view.md`](specs/kuiper-gantt-view.md) | Vista Gantt (barras, zoom, dependencias) |
 
 ## Diseño visual
 

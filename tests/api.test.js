@@ -178,4 +178,28 @@ describe('api', () => {
     assert.ok(after.body.data.timeEntries.length >= 1);
     assert.ok(after.body.data.events.length >= 3);
   });
+
+  it('supports schedule dates on cards', async () => {
+    const board = await get('/api/v1/boards/hub-delivery');
+    const cardId = board.body.data.cards[0].id;
+
+    const patched = await request('PATCH', `/api/v1/cards/${encodeURIComponent(cardId)}`, {
+      schedule_start_date: '2026-09-10',
+      schedule_end_date: '2026-09-15',
+    });
+    assert.equal(patched.status, 200);
+    assert.equal(patched.body.data.card.schedule_start_date, '2026-09-10');
+    assert.equal(patched.body.data.card.schedule_end_date, '2026-09-15');
+
+    const state = await get('/api/v1/boards/hub-delivery/state');
+    const task = state.body.data.tasks.find(t => t.id === cardId);
+    assert.equal(task.scheduleStartDate, '2026-09-10');
+    assert.equal(task.scheduleEndDate, '2026-09-15');
+
+    const bad = await request('PATCH', `/api/v1/cards/${encodeURIComponent(cardId)}`, {
+      schedule_start_date: '2026-09-20',
+      schedule_end_date: '2026-09-15',
+    });
+    assert.equal(bad.status, 400);
+  });
 });

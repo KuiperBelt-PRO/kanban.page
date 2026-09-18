@@ -1459,8 +1459,32 @@ function appendColumn(parent, col, items, { lane = null, showPhantom = false } =
   return el;
 }
 
+function renderViewModuleMissing() {
+  board.className = 'board kuiper-view-missing';
+  board.innerHTML = `<p class="kuiper-view-missing-msg">${esc(tr('viewModuleMissing'))}</p>`;
+}
+
 function renderBoard() {
   board.innerHTML = '';
+  if (KUIPER && typeof KuiperUI !== 'undefined') {
+    const view = KuiperUI.getBoardView?.() || 'board';
+    if (view === 'calendar') {
+      if (typeof KuiperCalendar !== 'undefined') {
+        KuiperCalendar.render(board);
+        return;
+      }
+      renderViewModuleMissing();
+      return;
+    }
+    if (view === 'gantt') {
+      if (typeof KuiperGantt !== 'undefined') {
+        KuiperGantt.render(board);
+        return;
+      }
+      renderViewModuleMissing();
+      return;
+    }
+  }
   const swimlanes = KUIPER && typeof KuiperUI !== 'undefined' && KuiperUI.isSwimlaneMode?.();
   board.classList.toggle('kuiper-swimlanes', !!swimlanes);
   if (swimlanes) board.style.setProperty('--stage-count', String(state.columns.length));
@@ -2245,6 +2269,8 @@ function openEditor(id, colId, { lane = null } = {}) {
     priority: 0,
     tags: [],
     estimatedMinutes: null,
+    scheduleStartDate: null,
+    scheduleEndDate: null,
     flag: state.flagFilter || false, columnId: colId || state.columns[0].id,
   };
   if (!t && colId) draft.columnId = colId;
@@ -2328,6 +2354,10 @@ function saveEditor() {
   draft.title = fTitle.value.trim();
   draft.notes = fNotes.value.trim();
   draft.session = fSession.value.trim();
+  if (KUIPER && typeof KuiperIssuePanel !== 'undefined') {
+    KuiperIssuePanel.syncDraft(draft);
+    if (!KuiperIssuePanel.validateScheduleDraft(draft)) return;
+  }
 
   if (!draft.title) { closeEditor(); return; }
 
@@ -3707,7 +3737,7 @@ window.__board = {
 if (KUIPER) {
   mergeKuiperDevicePrefs();
   if (typeof KuiperUI !== 'undefined') {
-    KuiperUI.init({
+    const kuiperHooks = {
       state: () => state,
       tr,
       locale: () => locale,
@@ -3737,6 +3767,8 @@ if (KUIPER) {
             priority: draft.priority || 0,
             flag: draft.flag,
             columnId: draft.columnId,
+            scheduleStartDate: draft.scheduleStartDate ?? null,
+            scheduleEndDate: draft.scheduleEndDate ?? null,
           });
         }
         closeEditor();
@@ -3750,7 +3782,10 @@ if (KUIPER) {
         save();
         render();
       },
-    });
+    };
+    KuiperUI.init(kuiperHooks);
+    if (typeof KuiperCalendar !== 'undefined') KuiperCalendar.init(kuiperHooks);
+    if (typeof KuiperGantt !== 'undefined') KuiperGantt.init(kuiperHooks);
   }
   const syncBtn = document.querySelector('[data-act="sync"]');
   if (syncBtn) syncBtn.hidden = true;
@@ -3767,6 +3802,7 @@ if (KUIPER) {
     if (typeof KuiperUI !== 'undefined') KuiperUI.openCardFromUrl();
   }).catch(err => {
     console.warn('kuiper load failed —', err);
+    toast(tr('boardLoadFailed'), null, 8000);
     render();
   });
 } else {

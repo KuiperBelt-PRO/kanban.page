@@ -7,6 +7,7 @@ const projects = require('./projects.js');
 const epics = require('./epics.js');
 const events = require('./events.js');
 const tags = require('./tags.js');
+const { resolveScheduleFields } = require('../../schedule.js');
 
 function assertProjectOnBoard(db, boardId, projectId) {
   const row = db.prepare('SELECT 1 AS n FROM board_projects WHERE board_id = ? AND project_id = ?')
@@ -57,6 +58,8 @@ function create(db, {
   flagged,
   priority,
   estimated_minutes,
+  schedule_start_date,
+  schedule_end_date,
   tags: tagNames,
 }) {
   let board = board_id ? boards.getById(db, board_id) : null;
@@ -76,14 +79,20 @@ function create(db, {
   }
 
   const stageRow = resolveStage(db, board.id, stage_id || stage);
+  const schedule = resolveScheduleFields(
+    { schedule_start_date: null, schedule_end_date: null },
+    { schedule_start_date, schedule_end_date },
+  );
   const { id, issue_number } = nextCardIdentity(db, project.id);
   const ts = nowIso();
   const position = nextPosition(db, stageRow.id);
   db.prepare(`
     INSERT INTO cards(
       id, project_id, board_id, epic_id, stage_id, position, title, notes,
-      session_ref, flagged, priority, estimated_minutes, issue_number, archived, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+      session_ref, flagged, priority, estimated_minutes,
+      schedule_start_date, schedule_end_date,
+      issue_number, archived, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
   `).run(
     id,
     project.id,
@@ -97,6 +106,8 @@ function create(db, {
     boolToInt(flagged),
     priority != null ? Number(priority) : 0,
     estimated_minutes != null ? Math.max(0, Math.round(Number(estimated_minutes))) : null,
+    schedule.schedule_start_date,
+    schedule.schedule_end_date,
     issue_number,
     ts,
     ts,
@@ -143,13 +154,23 @@ function update(db, id, fields) {
   const estimatedMinutes = fields.estimated_minutes !== undefined
     ? (fields.estimated_minutes == null ? null : Math.max(0, Math.round(Number(fields.estimated_minutes))))
     : card.estimated_minutes;
+  const schedule = (fields.schedule_start_date !== undefined || fields.schedule_end_date !== undefined)
+    ? resolveScheduleFields(card, fields)
+    : {
+      schedule_start_date: card.schedule_start_date || null,
+      schedule_end_date: card.schedule_end_date || null,
+    };
   const ts = nowIso();
 
   db.prepare(`
     UPDATE cards SET project_id = ?, epic_id = ?, title = ?, notes = ?,
-      session_ref = ?, flagged = ?, priority = ?, estimated_minutes = ?, updated_at = ?
+      session_ref = ?, flagged = ?, priority = ?, estimated_minutes = ?,
+      schedule_start_date = ?, schedule_end_date = ?, updated_at = ?
     WHERE id = ?
-  `).run(projectId, epicId, title, notes, sessionRef, flagged, priority, estimatedMinutes, ts, id);
+  `).run(
+    projectId, epicId, title, notes, sessionRef, flagged, priority, estimatedMinutes,
+    schedule.schedule_start_date, schedule.schedule_end_date, ts, id,
+  );
 
   if (fields.tags !== undefined) {
     tags.setForCard(db, id, card.board_id, fields.tags, { emitEvent: false });
@@ -171,6 +192,21 @@ function update(db, id, fields) {
       board_id: card.board_id,
       event_type: 'estimated_changed',
       payload: { estimated_minutes: estimatedMinutes },
+    });
+  }
+  const scheduleChanged = fields.schedule_start_date !== undefined || fields.schedule_end_date !== undefined;
+  if (scheduleChanged && (
+    schedule.schedule_start_date !== (card.schedule_start_date || null)
+    || schedule.schedule_end_date !== (card.schedule_end_date || null)
+  )) {
+    events.insert(db, {
+      card_id: id,
+      board_id: card.board_id,
+      event_type: 'schedule_changed',
+      payload: {
+        schedule_start_date: schedule.schedule_start_date,
+        schedule_end_date: schedule.schedule_end_date,
+      },
     });
   }
   if (fields.tags !== undefined) {

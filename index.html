@@ -56,6 +56,7 @@
 })();
 </script>
 <link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="vendor/gantt-renderer/styles/gantt.css">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%2314131A'/><rect x='9' y='7' width='6' height='18' rx='1.5' fill='%23FFB454'/><rect x='18' y='7' width='6' height='11' rx='1.5' fill='%235B5768'/></svg>">
 </head>
 <body>
@@ -282,12 +283,21 @@
 
 <input type="file" id="importFile" accept="application/json,.json" hidden>
 
+<script type="importmap">
+{
+  "imports": {
+    "zod": "./vendor/zod/index.js"
+  }
+}
+</script>
 <script src="i18n.js?v=kuiper"></script>
 <script src="core.js?v=kuiper"></script>
 <script src="kuiper-store.js?v=kuiper"></script>
 <script src="kuiper-datetime-picker.js?v=kuiper"></script>
 <script src="kuiper-issue-panel.js?v=kuiper"></script>
 <script src="kuiper-ui.js?v=kuiper"></script>
+<script src="kuiper-calendar.js?v=kuiper"></script>
+<script src="kuiper-gantt.js?v=kuiper"></script>
 <script src="tooltip.js?v=kuiper"></script>
 <script src="app.js?v=kuiper"></script>
 </body>

@@ -1357,3 +1357,47 @@ test('formatDurationShort renders compact labels', () => {
   assert.equal(C.formatDurationShort(85), '1h 25m');
   assert.equal(C.formatDurationShort(0), '');
 });
+
+test('validateSchedule accepts partial dates and rejects invalid range', () => {
+  assert.deepEqual(C.validateSchedule('2026-09-10', '2026-09-15'), {
+    ok: true, scheduleStartDate: '2026-09-10', scheduleEndDate: '2026-09-15',
+  });
+  assert.equal(C.validateSchedule('2026-09-20', '2026-09-15').ok, false);
+  assert.equal(C.validateSchedule('2026-09-10', null).ok, true);
+});
+
+test('issueOnDay handles range, start-only and deadline', () => {
+  const range = { scheduleStartDate: '2026-09-10', scheduleEndDate: '2026-09-12' };
+  assert.equal(C.issueOnDay(range, '2026-09-11'), true);
+  assert.equal(C.issueOnDay(range, '2026-09-13'), false);
+  const startOnly = { scheduleStartDate: '2026-09-10', scheduleEndDate: null };
+  assert.equal(C.issueOnDay(startOnly, '2026-09-10'), true);
+  const deadline = { scheduleStartDate: null, scheduleEndDate: '2026-09-12' };
+  assert.equal(C.issueOnDay(deadline, '2026-09-12'), true);
+});
+
+test('scheduleBoundsForTasks returns min start and max end', () => {
+  assert.deepEqual(C.scheduleBoundsForTasks([
+    { scheduleStartDate: '2026-09-10', scheduleEndDate: '2026-09-12' },
+    { scheduleStartDate: '2026-09-05', scheduleEndDate: '2026-09-20' },
+  ]), { start: '2026-09-05', end: '2026-09-20' });
+  assert.equal(C.scheduleBoundsForTasks([{ scheduleStartDate: null, scheduleEndDate: null }]), null);
+});
+
+test('cascadeScheduleMove shifts blocking successors recursively', () => {
+  const tasks = [
+    { id: 'a', scheduleStartDate: '2026-09-01', scheduleEndDate: '2026-09-03', blocks: [{ id: 'b' }] },
+    { id: 'b', scheduleStartDate: '2026-09-05', scheduleEndDate: '2026-09-06', blocks: [{ id: 'c' }] },
+    { id: 'c', scheduleStartDate: '2026-09-08', scheduleEndDate: '2026-09-09' },
+  ];
+  const graph = C.buildBlockingGraph(tasks);
+  const { patches, cycle } = C.cascadeScheduleMove(tasks, graph, 'a', 2);
+  assert.equal(cycle, false);
+  assert.equal(patches.length, 3);
+  assert.deepEqual(patches.find(p => p.id === 'b'), {
+    id: 'b', schedule_start_date: '2026-09-07', schedule_end_date: '2026-09-08',
+  });
+  assert.deepEqual(patches.find(p => p.id === 'c'), {
+    id: 'c', schedule_start_date: '2026-09-10', schedule_end_date: '2026-09-11',
+  });
+});

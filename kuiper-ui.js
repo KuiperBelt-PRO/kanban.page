@@ -37,7 +37,16 @@ const KuiperUI = (() => {
     ['position', 'sortPosition'],
     ['priority', 'sortPriority'],
     ['updated', 'sortUpdated'],
+    ['schedule', 'sortSchedule'],
   ];
+
+  const VIEW_OPTS = [
+    ['board', 'viewBoard'],
+    ['calendar', 'viewCalendar'],
+    ['gantt', 'viewGantt'],
+  ];
+
+  let boardView = 'board';
 
   function locale() {
     return ctx.locale?.() || 'en';
@@ -272,6 +281,12 @@ const KuiperUI = (() => {
       epicFilters: st.epicFilters || [],
       groupBy: st.groupBy || 'none',
       sortBy: st.sortBy || 'position',
+      boardView,
+      calendarMode: loadViewPrefs().calendarMode || 'month',
+      calendarAnchorDate: loadViewPrefs().calendarAnchorDate || null,
+      ganttZoom: loadViewPrefs().ganttZoom || 'week',
+      ganttAnchorDate: loadViewPrefs().ganttAnchorDate || null,
+      showDependencies: loadViewPrefs().showDependencies !== false,
       locale: locale(),
       favoriteBoards: getFavorites(),
       favoriteProjects: getFavoriteProjects(),
@@ -368,7 +383,75 @@ const KuiperUI = (() => {
     });
   }
 
+  function loadViewPrefs() {
+    return ctx.loadKuiperPrefs?.() || {};
+  }
+
+  function initBoardView() {
+    const prefs = loadViewPrefs();
+    const urlView = new URLSearchParams(location.search).get('view');
+    if (urlView === 'calendar' || urlView === 'gantt' || urlView === 'board') {
+      boardView = urlView;
+      saveUiPrefs({ boardView });
+      const u = new URL(location.href);
+      u.searchParams.delete('view');
+      history.replaceState(null, '', `${u.pathname}${u.search}${u.hash}`);
+    } else if (prefs.boardView === 'calendar' || prefs.boardView === 'gantt' || prefs.boardView === 'board') {
+      boardView = prefs.boardView;
+    } else {
+      boardView = 'board';
+    }
+    document.documentElement.dataset.kuiperView = boardView;
+  }
+
+  function getBoardView() {
+    return boardView;
+  }
+
+  function setBoardView(next) {
+    if (!VIEW_OPTS.some(([v]) => v === next)) return;
+    boardView = next;
+    document.documentElement.dataset.kuiperView = boardView;
+    saveUiPrefs({ boardView });
+    renderViewTabs();
+    ctx.renderBoard?.();
+  }
+
+  function viewTabsMarkup() {
+    const btns = VIEW_OPTS.map(([value, key]) =>
+      `<button type="button" class="kuiper-view-tab" data-view="${value}" role="tab" aria-selected="false">${esc(tr(key))}</button>`,
+    ).join('');
+    return `<div class="kuiper-view-tabs seg" role="tablist">${btns}</div>`;
+  }
+
+  function renderViewTabs() {
+    const tabs = document.querySelector('.kuiper-view-tabs');
+    if (!tabs) return;
+    tabs.querySelectorAll('.kuiper-view-tab').forEach(btn => {
+      const active = btn.dataset.view === boardView;
+      btn.setAttribute('aria-selected', String(active));
+      btn.setAttribute('aria-pressed', String(active));
+      btn.classList.toggle('is-active', active);
+    });
+    tabs.querySelectorAll('.kuiper-view-tab').forEach(btn => {
+      btn.onclick = () => setBoardView(btn.dataset.view);
+    });
+  }
+
   function ensureRailControls(container) {
+    const rail = document.querySelector('header.rail');
+    let tabs = document.querySelector('.kuiper-view-tabs');
+    if (!tabs) {
+      const holder = document.createElement('div');
+      holder.innerHTML = viewTabsMarkup();
+      tabs = holder.firstElementChild;
+    }
+    if (rail && tabs.parentElement !== rail) {
+      const filters = document.getElementById('filters');
+      if (filters) rail.insertBefore(tabs, filters);
+      else rail.insertBefore(tabs, rail.querySelector('.tools'));
+    }
+
     let view = document.getElementById('kuiperView');
     if (!view) {
       view = document.createElement('div');
@@ -680,6 +763,62 @@ const KuiperUI = (() => {
       ctx.save?.();
       ctx.render?.();
     });
+    renderViewTabs();
+  }
+
+  function visibleTasks({ includeUnscheduled = true } = {}) {
+    const st = ctx.state?.();
+    if (!st) return [];
+    return (st.tasks || []).filter(t => {
+      if (t.archivedAt) return false;
+      if (!matchesVisible(t)) return false;
+      if (!includeUnscheduled && !t.scheduleStartDate && !t.scheduleEndDate) return false;
+      return true;
+    });
+  }
+
+  function projectOf(task) {
+    const st = ctx.state?.();
+    return (st?.projects || []).find(p => p.id === task.projectId) || null;
+  }
+
+  async function applySchedulePatches(patches) {
+    const st = ctx.state?.();
+    if (!st || !patches?.length) return;
+    const rollback = patches.map(p => {
+      const t = st.tasks.find(x => x.id === p.id);
+      return t ? {
+        id: p.id,
+        scheduleStartDate: t.scheduleStartDate ?? null,
+        scheduleEndDate: t.scheduleEndDate ?? null,
+      } : null;
+    }).filter(Boolean);
+    for (const p of patches) {
+      const t = st.tasks.find(x => x.id === p.id);
+      if (!t) continue;
+      t.scheduleStartDate = p.schedule_start_date ?? null;
+      t.scheduleEndDate = p.schedule_end_date ?? null;
+    }
+    ctx.renderBoard?.();
+    try {
+      for (const p of patches) {
+        await KuiperStore.patchCard(p.id, {
+          schedule_start_date: p.schedule_start_date ?? null,
+          schedule_end_date: p.schedule_end_date ?? null,
+        });
+      }
+    } catch (err) {
+      for (const r of rollback) {
+        const t = st.tasks.find(x => x.id === r.id);
+        if (t) {
+          t.scheduleStartDate = r.scheduleStartDate;
+          t.scheduleEndDate = r.scheduleEndDate;
+        }
+      }
+      ctx.renderBoard?.();
+      ctx.toast?.(tr('scheduleSaveFailed'));
+      throw err;
+    }
   }
 
   function isSidebarOpen() {
@@ -935,6 +1074,7 @@ const KuiperUI = (() => {
 
   function init(hooks) {
     ctx = hooks;
+    initBoardView();
     if (typeof KuiperIssuePanel !== 'undefined') {
       KuiperIssuePanel.init({
         ...hooks,
@@ -1018,6 +1158,12 @@ const KuiperUI = (() => {
       copy.sort((a, b) => (b.priority || 0) - (a.priority || 0) || a.order - b.order);
     } else if (mode === 'updated') {
       copy.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    } else if (mode === 'schedule') {
+      copy.sort((a, b) => {
+        const ak = BoardCore.scheduleSortKey(a) || '9999-99-99';
+        const bk = BoardCore.scheduleSortKey(b) || '9999-99-99';
+        return ak.localeCompare(bk) || a.order - b.order;
+      });
     } else {
       copy.sort((a, b) => a.order - b.order);
     }
@@ -2124,12 +2270,21 @@ const KuiperUI = (() => {
       flagged: !!patch.flag,
       priority: patch.priority || 0,
       estimated_minutes: patch.estimatedMinutes ?? null,
+      schedule_start_date: patch.scheduleStartDate ?? null,
+      schedule_end_date: patch.scheduleEndDate ?? null,
       tags: patch.tags || [],
     };
   }
 
   return {
     init,
+    getBoardView,
+    setBoardView,
+    visibleTasks,
+    projectOf,
+    applySchedulePatches,
+    loadViewPrefs,
+    saveUiPrefs,
     onBoardLoaded,
     onLocale,
     refreshFilters,
@@ -2167,7 +2322,6 @@ const KuiperUI = (() => {
     renderSidebar,
     mountRailControls,
     renderRailControls,
-    saveUiPrefs,
     setSidebarOpen,
   };
 })();

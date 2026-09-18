@@ -33,7 +33,7 @@ describe('db migrate', () => {
     const db = openDb();
     const first = migrate(db);
     const second = migrate(db);
-    assert.equal(first.version, 4);
+    assert.equal(first.version, 5);
     assert.equal(second.applied, 0);
   });
 

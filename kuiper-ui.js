@@ -1152,6 +1152,23 @@ const KuiperUI = (() => {
     return lane ? `${lane}:${colEl.dataset.id}` : colEl.dataset.id;
   }
 
+  function defaultsForLane(laneKey) {
+    const st = ctx.state?.();
+    const mode = st?.groupBy || 'none';
+    if (mode === 'project') {
+      return { projectId: laneKey === '__none__' ? null : laneKey, epicId: null };
+    }
+    if (mode === 'epic') {
+      const epicId = laneKey === '__none__' ? null : laneKey;
+      const epic = epicId ? epicOf(epicId) : null;
+      return { epicId, projectId: epic?.projectId || null };
+    }
+    if (mode === 'priority') {
+      return { priority: Number(laneKey) || 0 };
+    }
+    return {};
+  }
+
   function buildCardProgress(t) {
     const est = t.estimatedMinutes;
     const logged = t.timeLoggedMinutes || 0;
@@ -1193,30 +1210,30 @@ const KuiperUI = (() => {
     return `<div class="kuiper-card-links" aria-label="${esc(tr('linkedActivities'))}">${chips}${more}</div>`;
   }
 
-  function buildCardMeta(t, project, since) {
+  function buildCardMeta(t, project) {
     const epic = t.epicId ? epicOf(t.epicId) : null;
     const progressHtml = buildCardProgress(t);
     const linksHtml = buildCardLinks(t);
-    const tags = [];
+    const scopeRows = [];
     if (project) {
-      tags.push(`<span class="kuiper-tag proj"><span class="tag-kind">${esc(tr('project'))}</span><span class="tag-val"><span class="dot" aria-hidden="true"></span><span class="lbl">${esc(project.name)}</span></span></span>`);
+      scopeRows.push(`<div class="kuiper-card-scope-row"><span class="kuiper-tag proj"><span class="tag-kind">${esc(tr('project'))}</span><span class="tag-val"><span class="dot" aria-hidden="true"></span><span class="lbl">${esc(project.name)}</span></span></span></div>`);
     }
     if (epic) {
       const ec = epicColor(epic);
       const epicStyle = ec ? ` style="--c:${esc(ec)}"` : '';
-      tags.push(`<span class="kuiper-tag epic"${epicStyle}><span class="tag-kind">${esc(tr('epic'))}</span><span class="tag-val"><span class="tri" aria-hidden="true"></span><span class="lbl">${esc(epic.title)}</span></span></span>`);
+      scopeRows.push(`<div class="kuiper-card-scope-row"><span class="kuiper-tag epic"${epicStyle}><span class="tag-kind">${esc(tr('epic'))}</span><span class="tag-val"><span class="tri" aria-hidden="true"></span><span class="lbl">${esc(epic.title)}</span></span></span></div>`);
     }
-    (t.tags || []).forEach(name => {
+    const scopeHtml = scopeRows.length ? `<div class="kuiper-card-scope">${scopeRows.join('')}</div>` : '';
+    const labelTags = (t.tags || []).map(name => {
       const c = tagColor(name);
-      tags.push(`<span class="kuiper-tag label" style="--c:${esc(c)}"><span class="tag-val"><span class="lbl">${esc(name)}</span></span></span>`);
+      return `<span class="kuiper-tag label" style="--c:${esc(c)}"><span class="tag-val"><span class="lbl">${esc(name)}</span></span></span>`;
     });
-    const tagsHtml = tags.length ? `<div class="kuiper-card-tags">${tags.join('')}</div>` : '';
-    const ageHtml = since ? `<span class="age" title="Untouched for ${since}">${since}</span>` : '';
-    const footHtml = (tagsHtml || ageHtml)
-      ? `<div class="kuiper-card-foot">${tagsHtml}${ageHtml}</div>`
+    const labelsHtml = labelTags.length ? `<div class="kuiper-card-labels">${labelTags.join('')}</div>` : '';
+    const footHtml = (scopeHtml || labelsHtml)
+      ? `<div class="kuiper-card-foot">${scopeHtml}${labelsHtml}</div>`
       : '';
     if (!progressHtml && !linksHtml && !footHtml) return '';
-    return `${progressHtml}${linksHtml}${footHtml}`;
+    return `${progressHtml}${footHtml}${linksHtml}`;
   }
 
   function decorateCardMeta(t, metaHtml) {
@@ -1799,11 +1816,25 @@ const KuiperUI = (() => {
       <button type="button" id="f-editor-save"></button>
       <button type="button" id="f-editor-archive"></button>
       <button type="button" id="f-editor-delete" class="danger"></button>`;
+    let primaryBtn = document.getElementById('f-editor-primary');
+    if (!primaryBtn) {
+      primaryBtn = document.createElement('button');
+      primaryBtn.type = 'button';
+      primaryBtn.className = 'primary sm kuiper-editor-primary';
+      primaryBtn.id = 'f-editor-primary';
+      primaryBtn.onclick = () => {
+        closeEditorMenu();
+        ctx.saveEditor?.();
+      };
+    }
+    const menuWrap = document.createElement('div');
+    menuWrap.className = 'kuiper-editor-menu-wrap';
+    menuWrap.append(menuBtn, menuPanel);
     if (closeBtn) {
       closeBtn.classList.add('kuiper-editor-close');
-      tools.append(menuBtn, menuPanel, closeBtn);
+      tools.append(menuWrap, primaryBtn, closeBtn);
     } else {
-      tools.append(menuBtn, menuPanel);
+      tools.append(menuWrap, primaryBtn);
     }
     head.append(idHead, tools);
 
@@ -1825,11 +1856,15 @@ const KuiperUI = (() => {
     aside.id = 'kuiperEditorAside';
     aside.innerHTML = `
       <div class="kuiper-aside-group">
+        ${editorSelectMarkup('kuiperEdStageCtrl', 'stage')}
         ${editorSelectMarkup('kuiperEdProjectCtrl', 'project')}
         ${editorSelectMarkup('kuiperEdEpicCtrl', 'epic')}
         ${editorSelectMarkup('kuiperEdPriCtrl', 'priority')}
         <div class="kuiper-ed-field kuiper-ed-flag-wrap" id="kuiperEdFlagWrap"></div>
       </div>`;
+
+    const stageSeg = document.getElementById('f-stage');
+    if (stageSeg) stageSeg.hidden = true;
 
     while (body.firstChild) main.append(body.firstChild);
     grid.append(main, aside);
@@ -1948,6 +1983,15 @@ const KuiperUI = (() => {
     const st = ctx.state?.();
     if (!st) return;
 
+    const stages = (st.columns || []).map(c => ({
+      value: c.id,
+      label: stageLabel(c.name),
+    }));
+    updateEditorSelect('kuiperEdStageCtrl', stages, draft.columnId || st.columns[0]?.id, value => {
+      draft.columnId = value;
+      renderEditorFields(draft);
+    });
+
     const projects = [{ value: null, label: tr('none') }].concat(
       (st.projects || []).map(p => ({ value: p.id, label: p.name, color: p.color })),
     );
@@ -2000,11 +2044,14 @@ const KuiperUI = (() => {
     const saveBtn = document.getElementById('f-editor-save');
     const archBtn = document.getElementById('f-editor-archive');
     const delBtn = document.getElementById('f-editor-delete');
+    const primaryBtn = document.getElementById('f-editor-primary');
+    const isNew = !editorEditingId || editorEditingId === 'new';
     if (saveBtn) saveBtn.textContent = tr('save');
     if (archBtn) archBtn.textContent = tr('archive');
     if (delBtn) delBtn.textContent = tr('delete');
+    if (primaryBtn) primaryBtn.textContent = isNew ? tr('create') : tr('save');
     const archItem = document.getElementById('f-editor-archive');
-    if (archItem) archItem.hidden = !editorEditingId || editorEditingId === 'new';
+    if (archItem) archItem.hidden = isNew;
   }
 
   function showEditorFields() {
@@ -2097,6 +2144,7 @@ const KuiperUI = (() => {
     buildSwimlaneSeparator,
     taskInLane,
     colScrollKey,
+    defaultsForLane,
     decorateCardMeta,
     buildCardMeta,
     cardIdRowHtml,

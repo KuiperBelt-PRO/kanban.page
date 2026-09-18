@@ -1429,7 +1429,14 @@ function appendColumn(parent, col, items, { lane = null, showPhantom = false } =
     body.append(ph);
   }
 
-  $('[data-add]', el).onclick = () => openComposer(col.id);
+  $('[data-add]', el).onclick = e => {
+    e.stopPropagation();
+    if (KUIPER && typeof KuiperUI !== 'undefined') {
+      openEditor(null, col.id, { lane });
+    } else {
+      openComposer(col.id);
+    }
+  };
   const del = $('[data-del]', el);
   if (del) del.onclick = () => deleteColumn(col.id);
 
@@ -1511,7 +1518,7 @@ function cardEl(t) {
 
   let metaBlock = '';
   if (kuiper) {
-    metaBlock = KuiperUI.buildCardMeta(t, p, since);
+    metaBlock = KuiperUI.buildCardMeta(t, p);
   } else if (p || since) {
     metaBlock = `<div class="meta">
         ${p ? `<span class="proj">${esc(p.name)}</span>` : ''}
@@ -2226,7 +2233,7 @@ const fFlag = $('#f-flag');
 
 let draft = null;
 
-function openEditor(id, colId) {
+function openEditor(id, colId, { lane = null } = {}) {
   closeComposer();
   const t = id ? byId(id) : null;
   editing = t ? t.id : 'new';
@@ -2240,16 +2247,20 @@ function openEditor(id, colId) {
     estimatedMinutes: null,
     flag: state.flagFilter || false, columnId: colId || state.columns[0].id,
   };
+  if (!t && colId) draft.columnId = colId;
+  if (!t && lane && KUIPER && typeof KuiperUI !== 'undefined') {
+    Object.assign(draft, KuiperUI.defaultsForLane(lane));
+  }
 
   fTitle.value = draft.title;
   fNotes.value = draft.notes || '';
   fSession.value = draft.session || '';
   $('#f-archive').style.visibility = t ? 'visible' : 'hidden';
   $('#f-close').title = tr('discard');
-  renderStage();
   if (KUIPER && typeof KuiperUI !== 'undefined') {
     KuiperUI.onEditorOpen(draft, editing);
   } else {
+    renderStage();
     renderProjectChooser();
   }
   syncFlagBtn();

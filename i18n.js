@@ -3,7 +3,7 @@ const BoardI18n = (() => {
   const copy = {
     en: {
       search: 'Search', more: 'More', report: 'Weekly report', newTask: 'New task',
-      task: 'Task', what: 'What needs doing?', notes: 'Notes', project: 'Project', session: 'Session', copy: 'Copy', archive: 'Archive', flag: 'Flag', unflag: 'Unflag', save: 'Save',
+      task: 'Task', what: 'What needs doing?', notes: 'Notes', project: 'Project', session: 'Session', copy: 'Copy', archive: 'Archive', flag: 'Flag', unflag: 'Unflag', save: 'Save', create: 'Create',
       weeklyReport: 'Weekly report', previousWeek: 'Previous week', nextWeek: 'Next week', close: 'Close', selectAll: 'Select all', selectNone: 'Select none', copyMarkdown: 'Copy markdown', download: 'Download .md',
       projects: 'Projects', newProject: 'New project', add: 'Add', deleteAll: 'Delete all', undo: 'Undo',
       theme: 'Toggle theme', compact: 'Compact cards', addStage: 'Add stage', sortProject: 'Sort by project', archiveFinished: 'Archive finished', export: 'Export backup', import: 'Import backup', language: 'Language',
@@ -78,7 +78,7 @@ const BoardI18n = (() => {
     },
     es: {
       search: 'Buscar', more: 'Más opciones', report: 'Informe semanal', newTask: 'Nueva tarea',
-      task: 'Tarea', what: '¿Qué hay que hacer?', notes: 'Notas', project: 'Proyecto', session: 'Sesión', copy: 'Copiar', archive: 'Archivar', flag: 'Destacar', unflag: 'Quitar destacado', save: 'Guardar',
+      task: 'Tarea', what: '¿Qué hay que hacer?', notes: 'Notas', project: 'Proyecto', session: 'Sesión', copy: 'Copiar', archive: 'Archivar', flag: 'Destacar', unflag: 'Quitar destacado', save: 'Guardar', create: 'Crear',
       weeklyReport: 'Informe semanal', previousWeek: 'Semana anterior', nextWeek: 'Semana siguiente', close: 'Cerrar', selectAll: 'Seleccionar todo', selectNone: 'No seleccionar nada', copyMarkdown: 'Copiar Markdown', download: 'Descargar .md',
       projects: 'Proyectos', newProject: 'Nuevo proyecto', add: 'Añadir', deleteAll: 'Eliminar todo', undo: 'Deshacer',
       theme: 'Cambiar tema', compact: 'Tarjetas compactas', addStage: 'Añadir etapa', sortProject: 'Ordenar por proyecto', archiveFinished: 'Archivar finalizadas', export: 'Exportar copia', import: 'Importar copia', language: 'Idioma',

@@ -782,15 +782,15 @@ const KuiperUI = (() => {
     return (st?.projects || []).find(p => p.id === task.projectId) || null;
   }
 
-  async function applySchedulePatches(patches) {
+  function applySchedulePatchesLocal(patches) {
     const st = ctx.state?.();
-    if (!st || !patches?.length) return;
+    if (!st || !patches?.length) return [];
     const rollback = patches.map(p => {
       const t = st.tasks.find(x => x.id === p.id);
       return t ? {
         id: p.id,
-        scheduleStartDate: t.scheduleStartDate ?? null,
-        scheduleEndDate: t.scheduleEndDate ?? null,
+        schedule_start_date: t.scheduleStartDate ?? null,
+        schedule_end_date: t.scheduleEndDate ?? null,
       } : null;
     }).filter(Boolean);
     for (const p of patches) {
@@ -799,23 +799,26 @@ const KuiperUI = (() => {
       t.scheduleStartDate = p.schedule_start_date ?? null;
       t.scheduleEndDate = p.schedule_end_date ?? null;
     }
-    ctx.renderBoard?.();
+    return rollback;
+  }
+
+  async function persistSchedulePatchesApi(patches) {
+    await Promise.all(patches.map(p => KuiperStore.patchCard(p.id, {
+      schedule_start_date: p.schedule_start_date ?? null,
+      schedule_end_date: p.schedule_end_date ?? null,
+    })));
+  }
+
+  async function applySchedulePatches(patches, opts = {}) {
+    const silent = opts.silent === true;
+    const rollback = applySchedulePatchesLocal(patches);
+    if (!silent) ctx.renderBoard?.();
+    if (opts.localOnly) return;
     try {
-      for (const p of patches) {
-        await KuiperStore.patchCard(p.id, {
-          schedule_start_date: p.schedule_start_date ?? null,
-          schedule_end_date: p.schedule_end_date ?? null,
-        });
-      }
+      await persistSchedulePatchesApi(patches);
     } catch (err) {
-      for (const r of rollback) {
-        const t = st.tasks.find(x => x.id === r.id);
-        if (t) {
-          t.scheduleStartDate = r.scheduleStartDate;
-          t.scheduleEndDate = r.scheduleEndDate;
-        }
-      }
-      ctx.renderBoard?.();
+      applySchedulePatchesLocal(rollback);
+      if (!silent) ctx.renderBoard?.();
       ctx.toast?.(tr('scheduleSaveFailed'));
       throw err;
     }
@@ -2283,6 +2286,8 @@ const KuiperUI = (() => {
     visibleTasks,
     projectOf,
     applySchedulePatches,
+    applySchedulePatchesLocal,
+    persistSchedulePatchesApi,
     loadViewPrefs,
     saveUiPrefs,
     onBoardLoaded,

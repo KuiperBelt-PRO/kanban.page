@@ -12,11 +12,22 @@ const KuiperGantt = (() => {
   const VIEWPORT_PAD_DAYS = 365;
   const WINDOW_DAYS = { day: 35, week: 91, month: 210 };
   const PAN_DAYS = { day: 7, week: 28, month: 60 };
+  const COL_ZOOM_LEVELS = [0.6, 0.75, 0.9, 1, 1.2, 1.5, 2];
+  const TIMELINE_HEADER_H = 52;
   let selectedCardId = null;
+  let timelineRangePick = null;
+  let hostEl = null;
   let renderToken = 0;
+  const ICON_COPY = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" aria-hidden="true"><rect x="5.6" y="5.6" width="7" height="7" rx="1.6"/><path d="M10.4 3.4H5.1c-.94 0-1.7.76-1.7 1.7v5.3" stroke-linecap="round"/></svg>';
+  const ICON_CAL = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><rect x="2.5" y="3.5" width="11" height="10" rx="1.5"/><path d="M5.5 2.5v2M10.5 2.5v2M2.5 6.5h11" stroke-linecap="round"/></svg>';
+  const ICON_OPEN = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" aria-hidden="true"><path d="M11.25 2.75 13.25 4.75 5.5 12.5 3.25 12.75 3.5 10.5 11.25 2.75z" stroke-linejoin="round"/><path d="M10 4 12 6" stroke-linecap="round"/></svg>';
   let layoutObserver = null;
   let bezierObserver = null;
+  let leftPaneObserver = null;
   let bezierRaf = 0;
+  let persistSeq = 0;
+  let bezierObservedEl = null;
+  let leftPaneObservedEl = null;
 
   const SCALES = { day: 'day', week: 'week', month: 'month' };
 
@@ -39,6 +50,43 @@ const KuiperGantt = (() => {
   function zoom() {
     const z = prefs().ganttZoom;
     return z === 'day' || z === 'month' ? z : 'week';
+  }
+
+  function colZoomIndex() {
+    const idx = Number(prefs().ganttColZoomIdx);
+    if (Number.isFinite(idx) && idx >= 0 && idx < COL_ZOOM_LEVELS.length) return idx;
+    return COL_ZOOM_LEVELS.indexOf(1);
+  }
+
+  function colZoomMultiplier() {
+    return COL_ZOOM_LEVELS[colZoomIndex()] || 1;
+  }
+
+  function rowHeightPx() {
+    return ganttLib?.ROW_HEIGHT || 32;
+  }
+
+  function cardIdFromRowNum(num) {
+    const key = idMaps.numToCard.get(num);
+    if (!key?.startsWith('card:')) return null;
+    return key.slice(5);
+  }
+
+  async function copyCardKey(cardId) {
+    if (!cardId) return;
+    const url = KuiperUI.cardLinkUrl?.(cardId) || `${location.origin}${location.pathname}?card=${cardId}`;
+    try {
+      if (ctx.copyText) {
+        const ok = await ctx.copyText(url);
+        if (ok) ctx.toast?.(tr('linkCopied'));
+        else ctx.toast?.(tr('couldNotCopy'));
+        return;
+      }
+      await navigator.clipboard.writeText(url);
+      ctx.toast?.(tr('linkCopied'));
+    } catch (e) {
+      ctx.toast?.(tr('couldNotCopy'));
+    }
   }
 
   async function loadLib() {
@@ -118,7 +166,7 @@ const KuiperGantt = (() => {
     return [startYmd, endYmd];
   }
 
-  function refreshTimelineWindow() {
+  function refreshTimelineWindow(smooth = false) {
     if (!chart || !shellEl) return;
     const [start, end] = timelineWindowFromCenter(windowCenter());
     chartOpts.viewportStart = start;
@@ -131,7 +179,7 @@ const KuiperGantt = (() => {
     if (!root) return;
     requestAnimationFrame(() => {
       stretchTimelineHeight(root);
-      scrollToToday(root);
+      scrollToToday(root, smooth);
       scheduleBezierSync(root);
     });
   }
@@ -145,7 +193,113 @@ const KuiperGantt = (() => {
 
   function goToToday() {
     savePrefs({ ganttWindowCenter: BoardCore.ymd() });
-    refreshTimelineWindow();
+    refreshTimelineWindow(true);
+  }
+
+  function cardTask(cardId) {
+    return (ctx.state?.().tasks || []).find(x => x.id === cardId) || null;
+  }
+
+  function dateToYmd(d) {
+    if (!(d instanceof Date) || Number.isNaN(d.getTime())) return '';
+    const y = d.getUTCFullYear();
+    const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(d.getUTCDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+
+  function leftPaneBody(root) {
+    const pane = root?.querySelector?.('[data-pane="left"]');
+    if (!pane) return null;
+    const body = pane.children[1];
+    return body?.classList?.contains('gantt-splitter-handle') ? null : body;
+  }
+
+  function getRowCells(row) {
+    return Array.from(row.children).filter(el => el.matches('span, div'));
+  }
+
+  function rowColumnIndex(row, target) {
+    const cells = getRowCells(row);
+    for (let i = 0; i < cells.length; i += 1) {
+      if (cells[i].contains(target)) return i;
+    }
+    return -1;
+  }
+
+  function captureScroll() {
+    const root = shellEl?.querySelector('.gantt-root');
+    const scrollEl = root?.children[0];
+    return scrollEl
+      ? { left: scrollEl.scrollLeft, top: scrollEl.scrollTop }
+      : null;
+  }
+
+  function persistPatches(patches) {
+    if (!patches?.length) return;
+    const scroll = captureScroll();
+    const rollback = KuiperUI.applySchedulePatchesLocal(patches);
+    const seq = ++persistSeq;
+    refreshChartDataLight({ scroll });
+    void (async () => {
+      try {
+        await KuiperUI.persistSchedulePatchesApi(patches);
+      } catch (err) {
+        if (seq !== persistSeq) return;
+        KuiperUI.applySchedulePatchesLocal(rollback);
+        refreshChartDataLight({ scroll });
+        ctx.toast?.(tr('scheduleSaveFailed'));
+      }
+    })();
+  }
+
+  function syncToolbar() {
+    if (!shellEl) return;
+    const label = shellEl.querySelector('.kuiper-gantt-colzoom-label');
+    if (label) label.textContent = `${Math.round(colZoomMultiplier() * 100)}%`;
+    shellEl.querySelectorAll('[data-zoom]').forEach(btn => {
+      btn.setAttribute('aria-pressed', String(zoom() === btn.dataset.zoom));
+    });
+    const zin = shellEl.querySelector('[data-act="zoom-in"]');
+    const zout = shellEl.querySelector('[data-act="zoom-out"]');
+    if (zout) zout.disabled = colZoomIndex() <= 0;
+    if (zin) zin.disabled = colZoomIndex() >= COL_ZOOM_LEVELS.length - 1;
+  }
+
+  function refreshChartDataLight({ scroll = null, autoScroll = false } = {}) {
+    if (!chart || !shellEl) return;
+    if (ganttLib) ganttLib.setColumnWidthMultiplier(colZoomMultiplier());
+    const { tasks, links } = buildTreeInput();
+    const [vpStartYmd, vpEndYmd] = timelineViewport(tasks);
+    chartOpts = {
+      scale: SCALES[zoom()] || 'week',
+      viewportStart: vpStartYmd,
+      viewportEnd: vpEndYmd,
+    };
+    chart.setOptions({
+      scale: chartOpts.scale,
+      viewportStart: new Date(`${vpStartYmd}T00:00:00Z`),
+      viewportEnd: new Date(`${vpEndYmd}T00:00:00Z`),
+    });
+    injectGanttStyles(tasks);
+    chart.update({ tasks, links });
+    const root = shellEl.querySelector('.gantt-root');
+    if (!root) return;
+    afterChartUpdate(root, renderToken);
+    const sc = root.children[0];
+    if (scroll && sc) {
+      sc.scrollLeft = scroll.left;
+      sc.scrollTop = scroll.top;
+    } else if (autoScroll) {
+      scrollToToday(root, false);
+    }
+  }
+
+  async function refreshChartData({ scroll = null, autoScroll = false } = {}) {
+    if (!chart || !shellEl) return;
+    await loadLib();
+    syncToolbar();
+    refreshChartDataLight({ scroll, autoScroll });
   }
 
   function pushCardTask(tasks, t, parentId, today) {
@@ -245,16 +399,20 @@ const KuiperGantt = (() => {
     return { tasks, links: idMaps.links };
   }
 
+  function formatScheduleCell(value) {
+    if (!value) return '';
+    try {
+      const d = new Date(`${value}T12:00:00Z`);
+      return d.toLocaleDateString(locale(), { day: 'numeric', month: 'short' });
+    } catch (e) {
+      return String(value);
+    }
+  }
+
   function gridColumns() {
     const fmt = (v, task) => {
-      if (task.data?.unscheduled) return '—';
-      if (!v) return '—';
-      try {
-        const d = new Date(`${v}T12:00:00Z`);
-        return d.toLocaleDateString(locale(), { day: 'numeric', month: 'short' });
-      } catch (e) {
-        return String(v);
-      }
+      if (!task.data?.cardId) return v ? formatScheduleCell(v) : '';
+      return formatScheduleCell(v);
     };
     return [
       {
@@ -309,7 +467,7 @@ const KuiperGantt = (() => {
           `.kuiper-gantt-v2 [data-pane="left"] .gantt-row[data-task-id="${num}"]{`
           + `background:color-mix(in srgb,${c} 14%,var(--raise))!important;`
           + `box-shadow:${sep}${c}!important;`
-          + `font-size:11px;font-weight:600;letter-spacing:.03em;text-transform:uppercase;`
+          + `font-size:10px;font-weight:600;letter-spacing:.03em;text-transform:uppercase;`
           + `}`,
           `.kuiper-gantt-v2 [data-pane="left"] .gantt-row[data-task-id="${num}"] > div:nth-child(2) > span:last-child{`
           + `color:color-mix(in srgb,${c} 55%,var(--text))!important;font-weight:600;`
@@ -321,7 +479,7 @@ const KuiperGantt = (() => {
           `.kuiper-gantt-v2 [data-pane="left"] .gantt-row[data-task-id="${num}"]{`
           + `background:color-mix(in srgb,${c} 10%,var(--surface))!important;`
           + `box-shadow:inset 3px 0 0 color-mix(in srgb,${c} 70%,transparent)!important;`
-          + `font-size:11px;font-weight:500;`
+          + `font-size:10px;font-weight:500;`
           + `}`,
           `.kuiper-gantt-v2 [data-pane="left"] .gantt-row[data-task-id="${num}"] > div:nth-child(2) > span:last-child{`
           + `color:color-mix(in srgb,${c} 45%,var(--text))!important;`
@@ -331,7 +489,7 @@ const KuiperGantt = (() => {
         rules.push(
           `.kuiper-gantt-v2 [data-pane="left"] .gantt-row[data-task-id="${num}"]{`
           + `background:color-mix(in srgb,var(--raise) 45%,var(--surface))!important;`
-          + `font-size:11px;font-weight:500;`
+          + `font-size:10px;font-weight:500;`
           + `}`,
         );
       }
@@ -367,12 +525,8 @@ const KuiperGantt = (() => {
   function scheduleBezierSync(root) {
     cancelAnimationFrame(bezierRaf);
     bezierRaf = requestAnimationFrame(() => {
-      bezierRaf = requestAnimationFrame(() => {
-        bezierRaf = requestAnimationFrame(() => {
-          const ganttRoot = root || shellEl?.querySelector('.gantt-root');
-          if (ganttRoot) syncBezierDeps(ganttRoot);
-        });
-      });
+      const ganttRoot = root || shellEl?.querySelector('.gantt-root');
+      if (ganttRoot) syncBezierDeps(ganttRoot);
     });
   }
 
@@ -445,7 +599,7 @@ const KuiperGantt = (() => {
   }
 
   function syncBezierDeps(root) {
-    if (!root || prefs().showDependencies === false) return;
+    if (!root) return;
     const group = ensureBezierOverlay(root);
     if (!group) return;
     while (group.firstChild) group.removeChild(group.firstChild);
@@ -468,7 +622,7 @@ const KuiperGantt = (() => {
     }
   }
 
-  function scrollToToday(root) {
+  function scrollToToday(root, smooth = false) {
     const scrollEl = root?.children[0];
     if (!scrollEl || !ganttLib || !chartOpts.viewportStart) return;
     const focusYmd = windowCenter();
@@ -482,8 +636,9 @@ const KuiperGantt = (() => {
     const leftW = leftPane?.offsetWidth || 0;
     const visibleRight = Math.max(120, scrollEl.clientWidth - leftW);
     const target = Math.max(0, focusX - Math.round(visibleRight * 0.38));
+    const behavior = smooth ? 'smooth' : 'auto';
     if (typeof scrollEl.scrollTo === 'function') {
-      scrollEl.scrollTo({ left: target, behavior: 'smooth' });
+      scrollEl.scrollTo({ left: target, behavior });
     } else {
       scrollEl.scrollLeft = target;
     }
@@ -494,7 +649,7 @@ const KuiperGantt = (() => {
     if (!scrollEl || scrollEl.clientHeight <= 0) return;
     const minBody = Math.max(0, scrollEl.clientHeight - 52);
     const left = root.querySelector('[data-pane="left"]');
-    const leftBody = left?.children[1];
+    const leftBody = leftPaneBody(root);
     const sc = getRightScrollContainer(root);
     const stripe = sc?.children[0];
     const abs = getAbsoluteLayer(root);
@@ -534,24 +689,312 @@ const KuiperGantt = (() => {
     const scrollEl = root.children[0];
     const right = root.querySelector('[data-pane="right"]');
     if (!right || !scrollEl) return null;
-    const headerH = 52;
     const rect = right.getBoundingClientRect();
     const x = event.clientX - rect.left + scrollEl.scrollLeft;
     const y = event.clientY - rect.top;
-    if (y < headerH) return null;
+    if (y < TIMELINE_HEADER_H) return null;
     const mapper = createPixelMapper(chartOpts.scale, new Date(`${chartOpts.viewportStart || BoardCore.ymd()}T00:00:00Z`));
     const d = mapper.toDate(x);
     const ymd = BoardCore.ymd(d);
     return BoardCore.validateSchedule(ymd, ymd).ok ? ymd : null;
   }
 
-  async function scheduleAtClick(cardId, day) {
-    await KuiperUI.applySchedulePatches([{
+  function cardIdFromTimelineEvent(event, root) {
+    const scrollEl = root.children[0];
+    const leftBody = leftPaneBody(root);
+    if (!scrollEl || !leftBody) return null;
+    const scrollRect = scrollEl.getBoundingClientRect();
+    const yInContent = event.clientY - scrollRect.top + scrollEl.scrollTop - TIMELINE_HEADER_H;
+    if (yInContent < 0) return null;
+    const pad = leftBody.firstElementChild;
+    const paddingTop = pad && !pad.classList.contains('gantt-row')
+      ? parseFloat(pad.style.height) || 0
+      : 0;
+    const rowH = rowHeightPx();
+    const idx = Math.floor((yInContent - paddingTop) / rowH);
+    const rows = leftBody.querySelectorAll('.gantt-row');
+    if (idx < 0 || idx >= rows.length) return null;
+    return cardIdFromRowNum(Number(rows[idx].dataset.taskId));
+  }
+
+  function applyScheduleRange(cardId, start, end) {
+    const v = BoardCore.validateSchedule(start, end);
+    if (!v.ok) {
+      ctx.toast?.(tr('scheduleSaveFailed'));
+      return;
+    }
+    timelineRangePick = null;
+    persistPatches([{
       id: cardId,
-      schedule_start_date: day,
-      schedule_end_date: day,
+      schedule_start_date: start,
+      schedule_end_date: end,
     }]);
-    ctx.renderBoard?.();
+  }
+
+  async function scheduleAtClick(cardId, day) {
+    await applyScheduleRange(cardId, day, day);
+  }
+
+  function schedulePatchesForDateEdit(cardId, field, ymd) {
+    const tasks = ctx.state?.().tasks || [];
+    const t = tasks.find(x => x.id === cardId);
+    if (!t) return null;
+    const start = field === 'start' ? ymd : (t.scheduleStartDate || ymd);
+    const end = field === 'end' ? ymd : (t.scheduleEndDate || ymd);
+    if (!BoardCore.validateSchedule(start, end).ok) return null;
+    const graph = BoardCore.buildBlockingGraph(tasks);
+    if (field === 'end') {
+      const origEnd = t.scheduleEndDate || t.scheduleStartDate;
+      if (origEnd && end !== origEnd) {
+        return BoardCore.cascadeEndResize(tasks, graph, cardId, end);
+      }
+    }
+    return {
+      patches: [{ id: cardId, schedule_start_date: start, schedule_end_date: end }],
+      cycle: false,
+    };
+  }
+
+  function patchScheduleField(cardId, field, ymd) {
+    const result = schedulePatchesForDateEdit(cardId, field, ymd);
+    if (!result) {
+      ctx.toast?.(tr('scheduleSaveFailed'));
+      return;
+    }
+    if (result.cycle) ctx.toast?.(tr('ganttCycleWarning'));
+    persistPatches(result.patches);
+  }
+
+  function ensureDatePicker() {
+    if (typeof KuiperDateTimePicker === 'undefined') return;
+    KuiperDateTimePicker.init?.({
+      tr: (k, v) => tr(k, v),
+      locale: () => (ctx.locale?.() === 'en' ? 'en' : 'es'),
+    });
+  }
+
+  function openSchedulePicker(anchor, cardId, field, current) {
+    ensureDatePicker();
+    if (typeof KuiperDateTimePicker === 'undefined') return;
+    KuiperDateTimePicker.openDate({
+      anchor,
+      value: current || BoardCore.ymd(),
+      scrim: false,
+      onPick: ymd => patchScheduleField(cardId, field, ymd),
+    });
+  }
+
+  function enhanceKeyCell(cell, cardId) {
+    if (cell.dataset.kuiperEnhanced === 'key') return;
+    cell.dataset.kuiperEnhanced = 'key';
+    cell.classList.add('kuiper-gantt-key-cell');
+    cell.textContent = '';
+    const wrap = document.createElement('div');
+    wrap.className = 'kuiper-gantt-key-wrap';
+    const idSpan = document.createElement('span');
+    idSpan.className = 'kuiper-gantt-key-id mono';
+    idSpan.textContent = cardId;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'icon sm kuiper-gantt-hover-btn kuiper-gantt-key-btn';
+    btn.innerHTML = ICON_COPY;
+    btn.title = tr('copyLink');
+    btn.setAttribute('aria-label', tr('copyLink'));
+    wrap.append(idSpan, btn);
+    cell.append(wrap);
+  }
+
+  function enhanceDateCell(cell, cardId, field, value) {
+    if (cell.dataset.kuiperEnhanced === `date-${field}`) {
+      const valEl = cell.querySelector('.kuiper-gantt-date-val');
+      if (valEl) valEl.textContent = value ? formatScheduleCell(value) : tr('ganttPickDate');
+      return;
+    }
+    cell.dataset.kuiperEnhanced = `date-${field}`;
+    cell.classList.add('kuiper-gantt-date-cell');
+    cell.textContent = '';
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'kuiper-gantt-date-btn';
+    btn.dataset.field = field;
+    btn.innerHTML = `<span class="kuiper-gantt-date-icon kuiper-gantt-hover-btn">${ICON_CAL}</span>`
+      + `<span class="kuiper-gantt-date-val">${value ? formatScheduleCell(value) : tr('ganttPickDate')}</span>`;
+    btn.title = field === 'start' ? tr('ganttColStart') : tr('ganttColEnd');
+    btn.setAttribute('aria-label', btn.title);
+    cell.append(btn);
+  }
+
+  function enhanceIssueCell(nameCell, cardId, title) {
+    if (nameCell.dataset.kuiperEnhanced === 'issue') {
+      const label = nameCell.querySelector('.kuiper-gantt-issue-label');
+      if (label && title) label.textContent = title;
+      return;
+    }
+    nameCell.dataset.kuiperEnhanced = 'issue';
+    nameCell.classList.add('kuiper-gantt-issue-cell');
+    const label = nameCell.querySelector('span:last-child');
+    if (label) {
+      label.classList.add('kuiper-gantt-issue-label');
+      if (title) label.textContent = title;
+    }
+    if (!nameCell.querySelector('.kuiper-gantt-issue-hover')) {
+      const icon = document.createElement('span');
+      icon.className = 'kuiper-gantt-issue-hover kuiper-gantt-hover-btn';
+      icon.innerHTML = ICON_OPEN;
+      icon.title = tr('ganttOpenIssue');
+      icon.setAttribute('aria-hidden', 'true');
+      if (label) nameCell.insertBefore(icon, label);
+      else nameCell.append(icon);
+    }
+  }
+
+  function enhanceLeftPaneRows(root) {
+    const leftBody = leftPaneBody(root);
+    if (!leftBody) return;
+    const tasksById = new Map((ctx.state?.().tasks || []).map(t => [t.id, t]));
+    leftBody.querySelectorAll('.gantt-row').forEach(row => {
+      const cardId = cardIdFromRowNum(Number(row.dataset.taskId));
+      if (!cardId) {
+        row.classList.remove('kuiper-gantt-card-row');
+        row.removeAttribute('data-card-row');
+        return;
+      }
+      const t = tasksById.get(cardId);
+      if (!t) return;
+      row.classList.add('kuiper-gantt-card-row');
+      row.dataset.cardRow = cardId;
+      const cells = getRowCells(row);
+      if (cells[0]) enhanceKeyCell(cells[0], cardId);
+      if (cells[1]) enhanceIssueCell(cells[1], cardId, t.title);
+      if (cells[2]) enhanceDateCell(cells[2], cardId, 'start', t.scheduleStartDate);
+      if (cells[3]) enhanceDateCell(cells[3], cardId, 'end', t.scheduleEndDate);
+    });
+  }
+
+  function wireLeftPaneActions(host) {
+    if (!host || host.dataset.kuiperLeftActions) return;
+    host.dataset.kuiperLeftActions = '1';
+    host.addEventListener('click', e => {
+      if (!e.target.closest('[data-pane="left"]')) return;
+      if (e.target.closest('.gantt-toggle, .gantt-add-btn')) return;
+      const row = e.target.closest('.gantt-row');
+      if (!row) return;
+      const cardId = cardIdFromRowNum(Number(row.dataset.taskId));
+      if (!cardId) return;
+      const colIdx = rowColumnIndex(row, e.target);
+      if (colIdx < 0) return;
+      const cells = getRowCells(row);
+      if (colIdx === 0) {
+        e.stopPropagation();
+        e.preventDefault();
+        copyCardKey(cardId);
+        return;
+      }
+      if (colIdx === 1) {
+        e.stopPropagation();
+        e.preventDefault();
+        selectedCardId = cardId;
+        ctx.openEditor?.(cardId);
+        return;
+      }
+      if (colIdx === 2 || colIdx === 3) {
+        e.stopPropagation();
+        e.preventDefault();
+        selectedCardId = cardId;
+        const field = colIdx === 2 ? 'start' : 'end';
+        const t = cardTask(cardId);
+        const anchor = cells[colIdx]?.querySelector('.kuiper-gantt-date-btn') || cells[colIdx];
+        const current = field === 'start' ? t?.scheduleStartDate : t?.scheduleEndDate;
+        openSchedulePicker(anchor, cardId, field, current);
+      }
+    }, true);
+  }
+
+  function bindLeftPaneObserver(root, token) {
+    const leftBody = leftPaneBody(root);
+    if (!leftBody || typeof MutationObserver === 'undefined') {
+      enhanceLeftPaneRows(root);
+      return;
+    }
+    if (leftPaneObserver && leftPaneObservedEl === leftBody) {
+      enhanceLeftPaneRows(root);
+      return;
+    }
+    if (leftPaneObserver) leftPaneObserver.disconnect();
+    leftPaneObservedEl = leftBody;
+    leftPaneObserver = new MutationObserver(() => {
+      if (token !== renderToken) return;
+      enhanceLeftPaneRows(root);
+    });
+    leftPaneObserver.observe(leftBody, { childList: true });
+    enhanceLeftPaneRows(root);
+  }
+
+
+  function wireTimelineSchedule(root) {
+    const scrollEl = root.children[0];
+    if (!scrollEl || scrollEl.dataset.kuiperTimelineSchedule) return;
+    scrollEl.dataset.kuiperTimelineSchedule = '1';
+    scrollEl.addEventListener('pointerdown', async e => {
+      if (e.button !== 0) return;
+      if (e.target.closest('.gantt-bar, .gantt-milestone, .gantt-resize-handle')) return;
+      const right = root.querySelector('[data-pane="right"]');
+      if (!right?.contains(e.target)) return;
+      const day = dateFromTimelineClick(e, root);
+      const cardId = cardIdFromTimelineEvent(e, root) || selectedCardId;
+      if (!day || !cardId) return;
+      const t = (ctx.state?.().tasks || []).find(x => x.id === cardId);
+      if (!t) return;
+      selectedCardId = cardId;
+      if (!isScheduled(t)) {
+        if (timelineRangePick?.cardId === cardId && timelineRangePick.day !== day) {
+          const a = timelineRangePick.day;
+          const b = day;
+          await applyScheduleRange(cardId, a <= b ? a : b, a <= b ? b : a);
+        } else if (timelineRangePick?.cardId === cardId && timelineRangePick.day === day) {
+          await scheduleAtClick(cardId, day);
+        } else {
+          timelineRangePick = { cardId, day };
+          ctx.toast?.(tr('ganttPickEndDate'));
+        }
+        return;
+      }
+      if (e.shiftKey) {
+        if (timelineRangePick?.cardId === cardId) {
+          const a = timelineRangePick.day;
+          const b = day;
+          await applyScheduleRange(cardId, a <= b ? a : b, a <= b ? b : a);
+        } else {
+          timelineRangePick = { cardId, day };
+          ctx.toast?.(tr('ganttPickEndDate'));
+        }
+      }
+    });
+  }
+
+  function changeColZoom(delta) {
+    const next = Math.max(0, Math.min(COL_ZOOM_LEVELS.length - 1, colZoomIndex() + delta));
+    if (next === colZoomIndex()) return;
+    savePrefs({ ganttColZoomIdx: next });
+    if (hostEl) render(hostEl);
+    else ctx.renderBoard?.();
+  }
+
+  function wireZoomKeys() {
+    if (document.body.dataset.kuiperGanttZoomKeys) return;
+    document.body.dataset.kuiperGanttZoomKeys = '1';
+    document.addEventListener('keydown', e => {
+      if (KuiperUI.getBoardView?.() !== 'gantt') return;
+      const mod = e.ctrlKey || e.metaKey;
+      if (!mod) return;
+      if (e.key === '=' || e.key === '+') {
+        e.preventDefault();
+        changeColZoom(1);
+      } else if (e.key === '-') {
+        e.preventDefault();
+        changeColZoom(-1);
+      }
+    });
   }
 
   function measureChartHeight() {
@@ -598,9 +1041,11 @@ const KuiperGantt = (() => {
   }
 
   function bindBezierObserver(root, token) {
-    if (bezierObserver) bezierObserver.disconnect();
     const abs = getAbsoluteLayer(root);
     if (!abs || typeof MutationObserver === 'undefined') return;
+    if (bezierObserver && bezierObservedEl === abs) return;
+    if (bezierObserver) bezierObserver.disconnect();
+    bezierObservedEl = abs;
     bezierObserver = new MutationObserver(() => {
       if (token !== renderToken) return;
       scheduleBezierSync(root);
@@ -608,10 +1053,17 @@ const KuiperGantt = (() => {
     bezierObserver.observe(abs, { childList: true, subtree: true });
   }
 
-  function wirePostRender(root, token) {
+  function afterChartUpdate(root, token) {
     stretchTimelineHeight(root);
     scheduleBezierSync(root);
+    enhanceLeftPaneRows(root);
+  }
+
+  function wirePostRender(root, token) {
+    afterChartUpdate(root, token);
     bindBezierObserver(root, token);
+    bindLeftPaneObserver(root, token);
+    wireTimelineSchedule(root);
     const scrollEl = root.children[0];
     if (scrollEl) {
       scrollEl.classList.add('kuiper-scroll', 'kuiper-gantt-scroll');
@@ -621,24 +1073,22 @@ const KuiperGantt = (() => {
         scheduleBezierSync(root);
       };
     }
-    const abs = root.querySelector('[data-pane="right"]')?.parentElement?.querySelector('div[style*="absolute"]');
-    if (abs && !abs.dataset.kuiperScheduleClick) {
-      abs.dataset.kuiperScheduleClick = '1';
-      abs.addEventListener('click', async e => {
-        if (e.target.closest('.gantt-bar, .gantt-milestone, .gantt-resize-handle')) return;
-        const day = dateFromTimelineClick(e, root);
-        if (!day || !selectedCardId) return;
-        const t = (ctx.state?.().tasks || []).find(x => x.id === selectedCardId);
-        if (t && !isScheduled(t)) await scheduleAtClick(selectedCardId, day);
-      });
-    }
   }
 
   async function render(host) {
     try {
+    hostEl = host;
     const lib = await loadLib();
-    const { GanttChart } = lib;
+    const { GanttChart, setColumnWidthMultiplier } = lib;
+    setColumnWidthMultiplier(colZoomMultiplier());
     const token = ++renderToken;
+
+    if (chart && host.querySelector('.kuiper-gantt-shell')) {
+      shellEl = host.querySelector('.kuiper-gantt-shell');
+      wireLeftPaneActions(shellEl);
+      await refreshChartData({ autoScroll: false });
+      return;
+    }
 
     host.innerHTML = '';
     host.className = 'board kuiper-gantt kuiper-gantt-v2';
@@ -647,18 +1097,23 @@ const KuiperGantt = (() => {
 
     const toolbar = document.createElement('div');
     toolbar.className = 'kuiper-gantt-toolbar';
+    const zoomPct = Math.round(colZoomMultiplier() * 100);
     toolbar.innerHTML = `
       <div class="kuiper-gantt-zoom seg">
         <button type="button" data-zoom="day" aria-pressed="${zoom() === 'day'}">${tr('ganttZoomDay')}</button>
         <button type="button" data-zoom="week" aria-pressed="${zoom() === 'week'}">${tr('ganttZoomWeek')}</button>
         <button type="button" data-zoom="month" aria-pressed="${zoom() === 'month'}">${tr('ganttZoomMonth')}</button>
       </div>
+      <div class="kuiper-gantt-colzoom" role="group" aria-label="${tr('ganttColZoom')}">
+        <button type="button" class="icon sm" data-act="zoom-out" aria-label="${tr('ganttZoomOut')}" ${colZoomIndex() <= 0 ? 'disabled' : ''}>−</button>
+        <span class="kuiper-gantt-colzoom-label" title="${tr('ganttColZoomHint')}">${zoomPct}%</span>
+        <button type="button" class="icon sm" data-act="zoom-in" aria-label="${tr('ganttZoomIn')}" ${colZoomIndex() >= COL_ZOOM_LEVELS.length - 1 ? 'disabled' : ''}>+</button>
+      </div>
       <div class="kuiper-gantt-nav">
         <button type="button" class="icon sm" data-act="prev" aria-label="${tr('ganttNavPrev')}">‹</button>
         <button type="button" class="pill sm" data-act="today">${tr('calendarToday')}</button>
         <button type="button" class="icon sm" data-act="next" aria-label="${tr('ganttNavNext')}">›</button>
-      </div>
-      <label class="kuiper-gantt-deps-toggle"><input type="checkbox" id="kuiperGanttDeps" ${prefs().showDependencies !== false ? 'checked' : ''}> ${tr('ganttShowDeps')}</label>`;
+      </div>`;
     shellEl.append(toolbar);
 
     const chartHost = document.createElement('div');
@@ -666,6 +1121,7 @@ const KuiperGantt = (() => {
     shellEl.append(chartHost);
 
     host.append(shellEl);
+    wireLeftPaneActions(shellEl);
     await new Promise(r => requestAnimationFrame(r));
 
     const { tasks, links } = buildTreeInput();
@@ -700,49 +1156,54 @@ const KuiperGantt = (() => {
 
     chart.setCallbacks({
       onTaskClick: ({ task }) => {
-        if (task.data?.cardId) {
-          selectedCardId = task.data.cardId;
-          if (!task.data.unscheduled) ctx.openEditor?.(task.data.cardId);
-        }
+        if (task.data?.cardId) selectedCardId = task.data.cardId;
       },
-      onTaskDoubleClick: ({ task }) => {
-        if (task.data?.cardId) ctx.openEditor?.(task.data.cardId);
-      },
-      onTaskMove: async ({ task, newStartDate, newEndDate }) => {
-        if (!task.data?.cardId || task.data.unscheduled) return false;
-        const st = ctx.state?.();
-        const graph = BoardCore.buildBlockingGraph(st.tasks || []);
+      onTaskDoubleClick: () => {},
+      onTaskMove: async ({ task, newStartDate }) => {
+        const cardId = task.data?.cardId;
+        if (!cardId || task.data.unscheduled) return false;
+        const before = cardTask(cardId);
+        if (!before || !isScheduled(before)) return false;
+        const anchorYmd = before.scheduleStartDate || before.scheduleEndDate;
         const { diffDays } = ganttLib;
         const delta = Math.round(diffDays(
-          new Date(`${task.startDate}T00:00:00Z`),
+          new Date(`${anchorYmd}T00:00:00Z`),
           newStartDate,
         ));
-        if (delta) {
-          const result = BoardCore.cascadeScheduleMove(st.tasks || [], graph, task.data.cardId, delta);
-          if (result.cycle) ctx.toast?.(tr('ganttCycleWarning'));
-          await KuiperUI.applySchedulePatches(result.patches);
-          ctx.renderBoard?.();
-          return true;
-        }
-        const s = newStartDate.toISOString().slice(0, 10);
-        const e = newEndDate.toISOString().slice(0, 10);
-        await KuiperUI.applySchedulePatches([{
-          id: task.data.cardId,
-          schedule_start_date: s,
-          schedule_end_date: e,
-        }]);
-        ctx.renderBoard?.();
+        if (!delta) return true;
+        const st = ctx.state?.();
+        const graph = BoardCore.buildBlockingGraph(st.tasks || []);
+        const result = BoardCore.cascadeScheduleMove(st.tasks || [], graph, cardId, delta);
+        if (result.cycle) ctx.toast?.(tr('ganttCycleWarning'));
+        persistPatches(result.patches);
         return true;
       },
       onTaskResize: async ({ task, newStartDate, newEndDate }) => {
-        if (!task.data?.cardId || task.data.unscheduled) return false;
-        const e = newEndDate.toISOString().slice(0, 10);
-        const st = ctx.state?.();
-        const graph = BoardCore.buildBlockingGraph(st.tasks || []);
-        const result = BoardCore.cascadeAfterResizeEnd(st.tasks || [], graph, task.data.cardId, e);
-        if (result.cycle) ctx.toast?.(tr('ganttCycleWarning'));
-        await KuiperUI.applySchedulePatches(result.patches);
-        ctx.renderBoard?.();
+        const cardId = task.data?.cardId;
+        if (!cardId || task.data.unscheduled) return false;
+        const before = cardTask(cardId);
+        if (!before) return false;
+        const s = dateToYmd(newStartDate);
+        const e = dateToYmd(newEndDate);
+        const origStart = before.scheduleStartDate;
+        const origEnd = before.scheduleEndDate;
+        const v = BoardCore.validateSchedule(s, e);
+        if (!v.ok) return false;
+        if (s !== origStart && e === origEnd) {
+          persistPatches([{ id: cardId, schedule_start_date: s, schedule_end_date: e }]);
+          return true;
+        }
+        if (e !== origEnd) {
+          const st = ctx.state?.();
+          const graph = BoardCore.buildBlockingGraph(st.tasks || []);
+          const result = BoardCore.cascadeEndResize(st.tasks || [], graph, cardId, e);
+          if (result.cycle) ctx.toast?.(tr('ganttCycleWarning'));
+          persistPatches(result.patches);
+          return true;
+        }
+        if (s !== origStart) {
+          persistPatches([{ id: cardId, schedule_start_date: s, schedule_end_date: e }]);
+        }
         return true;
       },
       onExpandCollapse: ({ task }) => {
@@ -751,7 +1212,10 @@ const KuiperGantt = (() => {
         const open = { ...(prefs().ganttOpen || {}) };
         open[key] = task.open === true;
         savePrefs({ ganttOpen: open });
-        requestAnimationFrame(() => wirePostRender(chartHost.querySelector('.gantt-root'), token));
+        requestAnimationFrame(() => {
+          const r = chartHost.querySelector('.gantt-root');
+          if (r) wirePostRender(r, token);
+        });
       },
       onLeftPaneWidthChange: ({ width }) => {
         savePrefs({ ganttPaneWidth: width });
@@ -759,7 +1223,7 @@ const KuiperGantt = (() => {
     });
 
     injectGanttStyles(tasks);
-    chart.update({ tasks, links: prefs().showDependencies === false ? [] : links });
+    chart.update({ tasks, links });
 
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
@@ -768,11 +1232,12 @@ const KuiperGantt = (() => {
         const root = chartHost.querySelector('.gantt-root');
         if (root) {
           wirePostRender(root, token);
+          wireZoomKeys();
           if (prefs().ganttScrollToday) {
             savePrefs({ ganttScrollToday: false, ganttWindowCenter: BoardCore.ymd() });
             goToToday();
           } else {
-            scrollToToday(root);
+            scrollToToday(root, false);
           }
         }
       });
@@ -790,10 +1255,8 @@ const KuiperGantt = (() => {
       if (chart) goToToday();
       else savePrefs({ ganttScrollToday: true });
     };
-    toolbar.querySelector('#kuiperGanttDeps')?.addEventListener('change', e => {
-      savePrefs({ showDependencies: e.target.checked });
-      ctx.renderBoard?.();
-    });
+    toolbar.querySelector('[data-act="zoom-in"]')?.addEventListener('click', () => changeColZoom(1));
+    toolbar.querySelector('[data-act="zoom-out"]')?.addEventListener('click', () => changeColZoom(-1));
 
     } catch (err) {
       console.error('KuiperGantt render failed', err);
@@ -812,6 +1275,12 @@ const KuiperGantt = (() => {
       bezierObserver.disconnect();
       bezierObserver = null;
     }
+    if (leftPaneObserver) {
+      leftPaneObserver.disconnect();
+      leftPaneObserver = null;
+    }
+    leftPaneObservedEl = null;
+    bezierObservedEl = null;
     document.getElementById('kuiper-gantt-theme')?.remove();
     if (layoutObserver) {
       layoutObserver.disconnect();

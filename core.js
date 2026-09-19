@@ -1168,6 +1168,39 @@ const BoardCore = (() => {
     return days;
   }
 
+  function isWeekendYmd(day) {
+    if (!isScheduleYmd(day)) return false;
+    const [y, mo, d] = day.split('-').map(Number);
+    const wd = new Date(Date.UTC(y, mo - 1, d)).getUTCDay();
+    return wd === 0 || wd === 6;
+  }
+
+  /** ISO week number for a calendar day (week-year + 1–53). */
+  function isoWeekFromYmd(day) {
+    const anchor = isScheduleYmd(day) ? day : ymd();
+    const [y, mo, d] = anchor.split('-').map(Number);
+    const date = new Date(Date.UTC(y, mo - 1, d));
+    const dayNum = date.getUTCDay() || 7;
+    date.setUTCDate(date.getUTCDate() + 4 - dayNum);
+    const isoYear = date.getUTCFullYear();
+    const yearStart = new Date(Date.UTC(isoYear, 0, 1));
+    const week = Math.ceil((((date - yearStart) / 86400000) + 1) / 7);
+    return { year: isoYear, week };
+  }
+
+  function mondayOfIsoWeek(isoYear, week) {
+    const jan4 = new Date(Date.UTC(isoYear, 0, 4));
+    const dayOfWeek = jan4.getUTCDay() || 7;
+    const monday = new Date(jan4);
+    monday.setUTCDate(jan4.getUTCDate() - dayOfWeek + 1 + (week - 1) * 7);
+    return toYmdUtc(monday.getUTCFullYear(), monday.getUTCMonth() + 1, monday.getUTCDate());
+  }
+
+  function isoWeekInputValue(day) {
+    const { year, week } = isoWeekFromYmd(mondayOf(day));
+    return `${year}-W${String(week).padStart(2, '0')}`;
+  }
+
   function issuesForDay(tasks, day) {
     return tasks
       .filter(t => issueOnDay(t, day))
@@ -1269,26 +1302,44 @@ const BoardCore = (() => {
     return { patches, cycle };
   }
 
-  function cascadeAfterResizeEnd(tasks, graph, predId, newPredEnd) {
+  function scheduleDayDelta(fromYmd, toYmd) {
+    if (!fromYmd || !toYmd || fromYmd === toYmd) return 0;
+    const a = new Date(`${fromYmd}T12:00:00Z`).getTime();
+    const b = new Date(`${toYmd}T12:00:00Z`).getTime();
+    return Math.round((b - a) / 86400000);
+  }
+
+  /** Al cambiar el end de una tarea, desplaza todas sus bloqueadas el mismo Δ (estirar o encoger). */
+  function cascadeEndResize(tasks, graph, predId, newPredEnd) {
     const byId = new Map((tasks || []).map(t => [t.id, t]));
     const pred = byId.get(predId);
     if (!pred || !newPredEnd) return { patches: [], cycle: false };
-    const direct = [...(graph.get(predId) || [])];
-    let maxDelta = 0;
-    for (const sid of direct) {
-      const succ = byId.get(sid);
-      if (!succ?.scheduleStartDate) continue;
-      maxDelta = Math.max(maxDelta, minDeltaForFinishToStart(newPredEnd, succ.scheduleStartDate));
-    }
-    if (!maxDelta) return { patches: [{ id: predId, schedule_start_date: pred.scheduleStartDate, schedule_end_date: newPredEnd }], cycle: false };
-    const move = cascadeScheduleMove(tasks, graph, predId, maxDelta);
-    const patches = move.patches.filter(p => p.id !== predId);
-    patches.unshift({
+    const origEnd = pred.scheduleEndDate || pred.scheduleStartDate;
+    const patches = [{
       id: predId,
       schedule_start_date: pred.scheduleStartDate,
       schedule_end_date: newPredEnd,
-    });
-    return { patches, cycle: move.cycle };
+    }];
+    if (!origEnd || origEnd === newPredEnd) return { patches, cycle: false };
+    const endDelta = scheduleDayDelta(origEnd, newPredEnd);
+    if (!endDelta) return { patches, cycle: false };
+    const cycle = detectBlockingCycle(graph);
+    const succIds = cycle ? [] : blockingSuccessors(graph, predId);
+    for (const id of succIds) {
+      const t = byId.get(id);
+      if (!t || (!t.scheduleStartDate && !t.scheduleEndDate)) continue;
+      const next = applyScheduleDelta(t, endDelta);
+      patches.push({
+        id,
+        schedule_start_date: next.scheduleStartDate,
+        schedule_end_date: next.scheduleEndDate,
+      });
+    }
+    return { patches, cycle };
+  }
+
+  function cascadeAfterResizeEnd(tasks, graph, predId, newPredEnd) {
+    return cascadeEndResize(tasks, graph, predId, newPredEnd);
   }
 
   function daysBetweenInclusive(start, end) {
@@ -1359,9 +1410,10 @@ const BoardCore = (() => {
     isScheduleYmd, validateSchedule, normalizeSchedulePatch, scheduleSpanDays,
     issueOnDay, issueIntersectsRange, scheduleSortKey, scheduleBoundsForTasks,
     applyScheduleDelta, moveScheduleByDays,
-    calendarMonthGrid, calendarWeekDays, issuesForDay, spanWeekRows,
+    calendarMonthGrid, calendarWeekDays, isWeekendYmd, isoWeekFromYmd, mondayOfIsoWeek, isoWeekInputValue,
+    issuesForDay, spanWeekRows,
     buildBlockingGraph, blockingSuccessors, detectBlockingCycle,
-    minDeltaForFinishToStart, cascadeScheduleMove, cascadeAfterResizeEnd,
+    scheduleDayDelta, minDeltaForFinishToStart, cascadeScheduleMove, cascadeEndResize, cascadeAfterResizeEnd,
     daysBetweenInclusive, compareYmd,
   };
 })();

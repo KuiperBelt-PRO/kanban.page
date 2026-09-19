@@ -1465,11 +1465,11 @@ function renderViewModuleMissing() {
 }
 
 function renderBoard() {
-  board.innerHTML = '';
   if (KUIPER && typeof KuiperUI !== 'undefined') {
     const view = KuiperUI.getBoardView?.() || 'board';
     if (view === 'calendar') {
       if (typeof KuiperCalendar !== 'undefined') {
+        board.innerHTML = '';
         KuiperCalendar.render(board);
         return;
       }
@@ -1478,13 +1478,17 @@ function renderBoard() {
     }
     if (view === 'gantt') {
       if (typeof KuiperGantt !== 'undefined') {
+        if (!board.querySelector('.kuiper-gantt-shell')) board.innerHTML = '';
+        board.className = 'board kuiper-gantt kuiper-gantt-v2';
         KuiperGantt.render(board);
         return;
       }
       renderViewModuleMissing();
       return;
     }
+    if (typeof KuiperGantt !== 'undefined') KuiperGantt.destroy();
   }
+  board.innerHTML = '';
   const swimlanes = KUIPER && typeof KuiperUI !== 'undefined' && KuiperUI.isSwimlaneMode?.();
   board.classList.toggle('kuiper-swimlanes', !!swimlanes);
   if (swimlanes) board.style.setProperty('--stage-count', String(state.columns.length));

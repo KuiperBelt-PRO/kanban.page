@@ -1,6 +1,8 @@
 /* Vista calendario Kuiper — mes / semana / día */
 const KuiperCalendar = (() => {
   let ctx = {};
+  let periodPickerDocBound = false;
+  let reopenPeriodPicker = false;
 
   function tr(key, vars) {
     return ctx.tr?.(key, vars) || key;
@@ -8,6 +10,10 @@ const KuiperCalendar = (() => {
 
   function locale() {
     return ctx.locale?.() === 'es' ? 'es-ES' : 'en-GB';
+  }
+
+  function localeShort() {
+    return ctx.locale?.() === 'es' ? 'es' : 'en';
   }
 
   function prefs() {
@@ -51,6 +57,83 @@ const KuiperCalendar = (() => {
     ctx.renderBoard?.();
   }
 
+  function setAnchorDate(next, { keepPickerOpen = false } = {}) {
+    if (!next) return;
+    reopenPeriodPicker = keepPickerOpen;
+    savePrefs({ calendarAnchorDate: next });
+    ctx.renderBoard?.();
+  }
+
+  function anchorMonthYear() {
+    const [y, mo] = anchorDate().split('-').map(Number);
+    return { year: y, month: mo };
+  }
+
+  function anchorIsoYear() {
+    const monday = BoardCore.mondayOf(anchorDate());
+    return BoardCore.isoWeekFromYmd(monday).year;
+  }
+
+  function weeksInIsoYear(isoYear) {
+    const out = [];
+    for (let w = 1; w <= 53; w++) {
+      const monday = BoardCore.mondayOfIsoWeek(isoYear, w);
+      const info = BoardCore.isoWeekFromYmd(monday);
+      if (info.year < isoYear) continue;
+      if (info.year > isoYear) break;
+      out.push({
+        week: info.week,
+        monday,
+        label: BoardCore.weekLabel(monday, localeShort()),
+      });
+    }
+    return out;
+  }
+
+  function setMonthYear(year, month, opts) {
+    const cur = anchorDate();
+    const curDay = +cur.split('-')[2];
+    const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    const day = Math.min(curDay, daysInMonth);
+    setAnchorDate(`${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`, opts);
+  }
+
+  function setWeekYear(isoYear, opts) {
+    const monday = BoardCore.mondayOf(anchorDate());
+    const { week } = BoardCore.isoWeekFromYmd(monday);
+    setAnchorDate(BoardCore.mondayOfIsoWeek(isoYear, week), opts);
+  }
+
+  function ensureDatePicker() {
+    if (typeof KuiperDateTimePicker === 'undefined') return;
+    KuiperDateTimePicker.init?.({
+      tr: (k, v) => tr(k, v),
+      locale: localeShort,
+    });
+  }
+
+  function openDayPicker(btn) {
+    ensureDatePicker();
+    if (typeof KuiperDateTimePicker === 'undefined') return;
+    const layer = document.getElementById('kuiperPickerLayer');
+    if (layer && !layer.hidden) {
+      KuiperDateTimePicker.close();
+      btn.setAttribute('aria-expanded', 'false');
+      return;
+    }
+    btn.setAttribute('aria-expanded', 'true');
+    KuiperDateTimePicker.openDate({
+      anchor: btn,
+      value: anchorDate(),
+      scrim: false,
+      onPick: ymd => {
+        btn.setAttribute('aria-expanded', 'false');
+        setAnchorDate(ymd);
+      },
+      onDismiss: () => btn.setAttribute('aria-expanded', 'false'),
+    });
+  }
+
   function formatMonthTitle(y, mo) {
     const d = new Date(Date.UTC(y, mo - 1, 1));
     return d.toLocaleDateString(locale(), { month: 'long', year: 'numeric' });
@@ -58,18 +141,35 @@ const KuiperCalendar = (() => {
 
   function formatDayTitle(day) {
     const d = new Date(`${day}T12:00:00Z`);
-    return d.toLocaleDateString(locale(), { weekday: 'long', day: 'numeric', month: 'long' });
+    return d.toLocaleDateString(locale(), { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  }
+
+  function periodTitle() {
+    const anchor = anchorDate();
+    const [y, mo] = anchor.split('-').map(Number);
+    if (mode() === 'month') return formatMonthTitle(y, mo);
+    if (mode() === 'week') {
+      const monday = BoardCore.mondayOf(anchor);
+      return BoardCore.weekLabel(monday, localeShort());
+    }
+    return formatDayTitle(anchor);
   }
 
   function esc(s) {
     return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
   }
 
-  function chipHtml(t, { deadline = false } = {}) {
+  function isMilestone(t) {
+    return !t.scheduleStartDate && !!t.scheduleEndDate;
+  }
+
+  function chipHtml(t, { milestone = false } = {}) {
     const p = KuiperUI.projectOf(t);
     const color = p?.color || '#9AA5B8';
-    const cls = deadline ? 'kuiper-cal-chip is-deadline' : 'kuiper-cal-chip';
+    const cls = milestone ? 'kuiper-cal-chip is-milestone' : 'kuiper-cal-chip';
+    const mark = milestone ? '<span class="kuiper-cal-chip-milestone" aria-hidden="true"></span>' : '';
     return `<button type="button" class="${cls}" data-task-id="${esc(t.id)}" style="--c:${esc(color)}" title="${esc(t.title)}">
+      ${mark}
       <span class="kuiper-cal-chip-id">${esc(t.id)}</span>
       <span class="kuiper-cal-chip-title">${esc(t.title)}</span>
     </button>`;
@@ -112,7 +212,7 @@ const KuiperCalendar = (() => {
   }
 
   function weekDayFromX(root, clientX) {
-    const track = root.querySelector('.kuiper-cal-bar-track, .kuiper-cal-week-head');
+    const track = root.querySelector('.kuiper-cal-head');
     if (!track) return null;
     const days = BoardCore.calendarWeekDays(anchorDate());
     const rect = track.getBoundingClientRect();
@@ -201,16 +301,59 @@ const KuiperCalendar = (() => {
     return KuiperUI.groupedTasks(KuiperUI.sortTasks(tasks));
   }
 
-  function renderMonth(body, tasks) {
-    const anchor = anchorDate();
-    const { year, month, weeks } = BoardCore.calendarMonthGrid(anchor);
-    const today = BoardCore.ymd();
-    const groups = groupedVisibleTasks();
-    let html = '<div class="kuiper-cal-grid" role="grid">';
-    const wd = locale().startsWith('es')
+  function groupedItemsForDay(day, tasks, groups) {
+    const st = ctx.state?.();
+    const dayTasks = BoardCore.issuesForDay(tasks, day);
+    if (st?.groupBy && st.groupBy !== 'none') {
+      return groups
+        .map(g => ({ header: g.header, items: g.tasks.filter(t => BoardCore.issueOnDay(t, day)) }))
+        .filter(g => g.items.length);
+    }
+    return [{ header: null, items: dayTasks }];
+  }
+
+  function renderCellBody(day, tasks, groups, { maxChips = null } = {}) {
+    let html = '';
+    const grouped = groupedItemsForDay(day, tasks, groups);
+    for (const g of grouped) {
+      if (g.header) html += `<div class="kuiper-cal-group">${esc(g.header)}</div>`;
+      const limit = maxChips ?? (document.documentElement.dataset.density === 'compact' ? 2 : 3);
+      const showAll = maxChips === Infinity;
+      const visible = showAll ? g.items : g.items.slice(0, limit);
+      visible.forEach(t => {
+        html += chipHtml(t, { milestone: isMilestone(t) });
+      });
+      if (!showAll && g.items.length > limit) {
+        html += `<button type="button" class="kuiper-cal-more" data-day="${day}">${tr('calendarMore', { n: g.items.length - limit })}</button>`;
+      }
+    }
+    return html;
+  }
+
+  function cellClassNames(day, today) {
+    const classes = ['kuiper-cal-cell'];
+    if (day === today) classes.push('is-today');
+    if (BoardCore.isWeekendYmd(day)) classes.push('is-weekend');
+    return classes.join(' ');
+  }
+
+  function weekdayHeaders() {
+    return locale().startsWith('es')
       ? ['lun', 'mar', 'mié', 'jue', 'vie', 'sáb', 'dom']
       : ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-    html += `<div class="kuiper-cal-head" role="row">${wd.map(w => `<span role="columnheader">${w}</span>`).join('')}</div>`;
+  }
+
+  function renderMonth(body, tasks) {
+    const anchor = anchorDate();
+    const { weeks } = BoardCore.calendarMonthGrid(anchor);
+    const today = BoardCore.ymd();
+    const groups = groupedVisibleTasks();
+    const wd = weekdayHeaders();
+    let html = '<div class="kuiper-cal-scroll-wrap kuiper-scroll"><div class="kuiper-cal-grid" role="grid">';
+    html += `<div class="kuiper-cal-head" role="row">${wd.map((w, i) => {
+      const weekend = i >= 5;
+      return `<span class="${weekend ? 'is-weekend' : ''}" role="columnheader">${w}</span>`;
+    }).join('')}</div>`;
     for (const week of weeks) {
       html += '<div class="kuiper-cal-row" role="row">';
       for (const day of week) {
@@ -218,31 +361,14 @@ const KuiperCalendar = (() => {
           html += '<div class="kuiper-cal-cell is-pad" role="gridcell"></div>';
           continue;
         }
-        const isToday = day === today;
-        const dayTasks = BoardCore.issuesForDay(tasks, day);
-        html += `<div class="kuiper-cal-cell${isToday ? ' is-today' : ''}" role="gridcell" data-day="${day}" aria-label="${esc(day)}">
+        html += `<div class="${cellClassNames(day, today)}" role="gridcell" data-day="${day}" aria-label="${esc(day)}">
           <div class="kuiper-cal-daynum">${+day.split('-')[2]}</div>
-          <div class="kuiper-cal-cell-body">`;
-        const st = ctx.state?.();
-        const grouped = (st?.groupBy && st.groupBy !== 'none')
-          ? groups.map(g => ({ header: g.header, items: g.tasks.filter(t => BoardCore.issueOnDay(t, day)) })).filter(g => g.items.length)
-          : [{ header: null, items: dayTasks }];
-        for (const g of grouped) {
-          if (g.header) html += `<div class="kuiper-cal-group">${esc(g.header)}</div>`;
-          const max = document.documentElement.dataset.density === 'compact' ? 2 : 3;
-          g.items.slice(0, max).forEach(t => {
-            const deadline = !t.scheduleStartDate && !!t.scheduleEndDate;
-            html += chipHtml(t, { deadline });
-          });
-          if (g.items.length > max) {
-            html += `<button type="button" class="kuiper-cal-more" data-day="${day}">${tr('calendarMore', { n: g.items.length - max })}</button>`;
-          }
-        }
-        html += '</div></div>';
+          <div class="kuiper-cal-cell-body">${renderCellBody(day, tasks, groups)}</div>
+        </div>`;
       }
       html += '</div>';
     }
-    html += '</div>';
+    html += '</div></div>';
     body.innerHTML = html;
     bindChips(body);
     body.querySelectorAll('.kuiper-cal-more').forEach(btn => {
@@ -254,7 +380,6 @@ const KuiperCalendar = (() => {
     });
     body.querySelectorAll('.kuiper-cal-cell[data-day]').forEach(cell => {
       cell.addEventListener('dblclick', () => {
-        const day = cell.dataset.day;
         ctx.openEditor?.('new');
       });
     });
@@ -264,33 +389,29 @@ const KuiperCalendar = (() => {
     const days = BoardCore.calendarWeekDays(anchorDate());
     const today = BoardCore.ymd();
     const groups = groupedVisibleTasks();
-    let html = '<div class="kuiper-cal-week">';
-    html += `<div class="kuiper-cal-week-head">${days.map(day => {
+    let html = '<div class="kuiper-cal-scroll-wrap kuiper-scroll"><div class="kuiper-cal-grid kuiper-cal-week-grid" role="grid">';
+    html += '<div class="kuiper-cal-head" role="row">';
+    days.forEach(day => {
       const d = new Date(`${day}T12:00:00Z`);
       const label = d.toLocaleDateString(locale(), { weekday: 'short', day: 'numeric' });
-      return `<div class="kuiper-cal-week-col${day === today ? ' is-today' : ''}" data-day="${day}"><span>${label}</span></div>`;
-    }).join('')}</div>`;
-    html += '<div class="kuiper-cal-week-body">';
-    for (const g of groups) {
-      if (g.header) html += `<div class="kuiper-cal-week-group">${esc(g.header)}</div>`;
-      for (const t of g.tasks) {
-        const span = BoardCore.spanWeekRows(t, days);
-        if (!span) continue;
-        const p = KuiperUI.projectOf(t);
-        const color = p?.color || '#9AA5B8';
-        const deadline = !t.scheduleStartDate && !!t.scheduleEndDate;
-        html += `<div class="kuiper-cal-bar-row">
-          <div class="kuiper-cal-bar-label">${esc(t.id)}</div>
-          <div class="kuiper-cal-bar-track">
-            <button type="button" class="kuiper-cal-bar${deadline ? ' is-deadline' : ''}" data-task-id="${esc(t.id)}"
-              style="--c:${esc(color)};grid-column:${span.from + 1} / span ${span.span};">${esc(t.title)}</button>
-          </div>
-        </div>`;
-      }
+      const weekend = BoardCore.isWeekendYmd(day);
+      html += `<span class="${weekend ? 'is-weekend' : ''}" role="columnheader">${esc(label)}</span>`;
+    });
+    html += '</div><div class="kuiper-cal-row kuiper-cal-week-row" role="row">';
+    for (const day of days) {
+      html += `<div class="${cellClassNames(day, today)} kuiper-cal-week-cell" role="gridcell" data-day="${day}" aria-label="${esc(day)}">
+        <div class="kuiper-cal-daynum">${+day.split('-')[2]}</div>
+        <div class="kuiper-cal-cell-body">${renderCellBody(day, tasks, groups, { maxChips: Infinity })}</div>
+      </div>`;
     }
-    html += '</div></div>';
+    html += '</div></div></div>';
     body.innerHTML = html;
     bindChips(body);
+    body.querySelectorAll('.kuiper-cal-cell[data-day]').forEach(cell => {
+      cell.addEventListener('dblclick', () => {
+        ctx.openEditor?.('new');
+      });
+    });
   }
 
   function renderDay(body, tasks) {
@@ -302,7 +423,7 @@ const KuiperCalendar = (() => {
       if (!items.length) continue;
       html += `<section class="kuiper-cal-day-section"><h4>${esc(g.header || tr('all'))}</h4><div class="kuiper-cal-day-list">`;
       items.forEach(t => {
-        html += chipHtml(t, { deadline: !t.scheduleStartDate && !!t.scheduleEndDate });
+        html += chipHtml(t, { milestone: isMilestone(t) });
       });
       html += '</section>';
     }
@@ -314,9 +435,142 @@ const KuiperCalendar = (() => {
     bindChips(body);
   }
 
-  function unscheduledCount() {
-    return KuiperUI.visibleTasks({ includeUnscheduled: true })
-      .filter(t => !t.scheduleStartDate && !t.scheduleEndDate).length;
+  function monthPickerHtml() {
+    const { year, month } = anchorMonthYear();
+    const months = [];
+    for (let m = 1; m <= 12; m++) {
+      const label = new Date(Date.UTC(2026, m - 1, 1)).toLocaleDateString(locale(), { month: 'short' });
+      const active = m === month;
+      months.push(`<button type="button" class="kuiper-cal-month-opt${active ? ' is-active' : ''}" data-month="${m}">${esc(label)}</button>`);
+    }
+    return `<div class="kuiper-cal-picker-month">
+      <div class="kuiper-cal-year-step">
+        <button type="button" class="icon sm" data-year-delta="-1" aria-label="${esc(tr('ganttNavPrev'))}">‹</button>
+        <span class="kuiper-cal-year-label">${year}</span>
+        <button type="button" class="icon sm" data-year-delta="1" aria-label="${esc(tr('ganttNavNext'))}">›</button>
+      </div>
+      <div class="kuiper-cal-month-grid">${months.join('')}</div>
+    </div>`;
+  }
+
+  function weekPickerHtml() {
+    const isoYear = anchorIsoYear();
+    const currentMonday = BoardCore.mondayOf(anchorDate());
+    const weeks = weeksInIsoYear(isoYear);
+    const items = weeks.map(w => {
+      const active = w.monday === currentMonday;
+      return `<button type="button" class="kuiper-cal-week-opt${active ? ' is-active' : ''}" data-monday="${esc(w.monday)}">
+        <span class="kuiper-cal-week-num">W${w.week}</span>
+        <span class="kuiper-cal-week-label">${esc(w.label)}</span>
+      </button>`;
+    }).join('');
+    return `<div class="kuiper-cal-picker-week">
+      <div class="kuiper-cal-year-step">
+        <button type="button" class="icon sm" data-year-delta="-1" aria-label="${esc(tr('ganttNavPrev'))}">‹</button>
+        <span class="kuiper-cal-year-label">${isoYear}</span>
+        <button type="button" class="icon sm" data-year-delta="1" aria-label="${esc(tr('ganttNavNext'))}">›</button>
+      </div>
+      <div class="kuiper-cal-week-list kuiper-scroll" role="listbox" aria-label="${esc(tr('calendarPickWeek'))}">${items}</div>
+    </div>`;
+  }
+
+  const periodChevron = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 6.5L8 10l3.5-3.5"/></svg>';
+
+  function positionPeriodPop(btn, pop) {
+    const r = btn.getBoundingClientRect();
+    pop.style.top = `${Math.round(r.bottom + 8)}px`;
+    pop.style.left = `${Math.round(r.left + r.width / 2)}px`;
+  }
+
+  function openPeriodPop(btn, pop) {
+    if (mode() === 'day') {
+      openDayPicker(btn);
+      return;
+    }
+    if (mode() === 'month') pop.innerHTML = monthPickerHtml();
+    else pop.innerHTML = weekPickerHtml();
+    bindPickerActions(pop);
+    pop.hidden = false;
+    btn.setAttribute('aria-expanded', 'true');
+    positionPeriodPop(btn, pop);
+    pop.querySelector('.kuiper-cal-week-opt.is-active')?.scrollIntoView({ block: 'nearest' });
+  }
+
+  function closePeriodPopovers(except) {
+    document.querySelectorAll('.kuiper-cal-period-pop').forEach(pop => {
+      if (pop !== except) pop.hidden = true;
+    });
+  }
+
+  function bindPeriodPicker(toolbar) {
+    const btn = toolbar.querySelector('.kuiper-cal-period-btn');
+    const pop = toolbar.querySelector('.kuiper-cal-period-pop');
+    if (!btn || !pop) return;
+
+    btn.onclick = e => {
+      e.stopPropagation();
+      if (mode() === 'day') {
+        closePeriodPopovers();
+        openDayPicker(btn);
+        return;
+      }
+      const open = !pop.hidden;
+      closePeriodPopovers();
+      if (open) {
+        pop.hidden = true;
+        btn.setAttribute('aria-expanded', 'false');
+        return;
+      }
+      openPeriodPop(btn, pop);
+    };
+
+    if (!periodPickerDocBound) {
+      document.addEventListener('click', e => {
+        document.querySelectorAll('.kuiper-cal-period-pop:not([hidden])').forEach(openPop => {
+          const openBtn = openPop.parentElement?.querySelector('.kuiper-cal-period-btn');
+          if (!openPop.contains(e.target) && !openBtn?.contains(e.target)) {
+            openPop.hidden = true;
+            openBtn?.setAttribute('aria-expanded', 'false');
+          }
+        });
+      });
+      periodPickerDocBound = true;
+    }
+  }
+
+  function bindPickerActions(pop) {
+    pop.querySelectorAll('[data-year-delta]').forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        const delta = +btn.dataset.yearDelta;
+        if (pop.querySelector('.kuiper-cal-picker-week')) {
+          setWeekYear(anchorIsoYear() + delta, { keepPickerOpen: true });
+        } else {
+          const { year, month } = anchorMonthYear();
+          setMonthYear(year + delta, month, { keepPickerOpen: true });
+        }
+      });
+    });
+
+    pop.querySelectorAll('.kuiper-cal-month-opt').forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        const month = +btn.dataset.month;
+        const { year } = anchorMonthYear();
+        setMonthYear(year, month);
+      });
+    });
+
+    pop.querySelectorAll('.kuiper-cal-week-opt').forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        const monday = btn.dataset.monday;
+        if (!monday) return;
+        setAnchorDate(monday);
+        pop.hidden = true;
+        pop.parentElement?.querySelector('.kuiper-cal-period-btn')?.setAttribute('aria-expanded', 'false');
+      });
+    });
   }
 
   function render(host) {
@@ -327,13 +581,6 @@ const KuiperCalendar = (() => {
     shell.className = 'kuiper-cal-shell';
     const toolbar = document.createElement('div');
     toolbar.className = 'kuiper-cal-toolbar';
-    const anchor = anchorDate();
-    const [y, mo] = anchor.split('-').map(Number);
-    const title = mode() === 'month'
-      ? formatMonthTitle(y, mo)
-      : mode() === 'week'
-        ? formatDayTitle(BoardCore.calendarWeekDays(anchor)[0])
-        : formatDayTitle(anchor);
     toolbar.innerHTML = `
       <div class="kuiper-cal-mode seg">
         <button type="button" data-mode="month" aria-pressed="${mode() === 'month'}">${esc(tr('calendarMonth'))}</button>
@@ -341,17 +588,22 @@ const KuiperCalendar = (() => {
         <button type="button" data-mode="day" aria-pressed="${mode() === 'day'}">${esc(tr('calendarDay'))}</button>
       </div>
       <div class="kuiper-cal-nav">
-        <button type="button" class="icon sm" data-act="prev" aria-label="Previous">‹</button>
+        <div class="kuiper-cal-period-nav" data-period="${esc(mode())}">
+          <button type="button" class="icon sm kuiper-cal-step" data-act="prev" aria-label="${esc(tr('ganttNavPrev'))}">‹</button>
+          <div class="kuiper-cal-period">
+            <button type="button" class="kuiper-cal-period-btn" aria-haspopup="true" aria-expanded="false">
+              <span class="kuiper-cal-period-label">${esc(periodTitle())}</span>
+              ${periodChevron}
+            </button>
+            <div class="kuiper-cal-period-pop" hidden${mode() === 'day' ? ' data-skip-pop="1"' : ''}></div>
+          </div>
+          <button type="button" class="icon sm kuiper-cal-step" data-act="next" aria-label="${esc(tr('ganttNavNext'))}">›</button>
+        </div>
         <button type="button" class="pill" data-act="today">${esc(tr('calendarToday'))}</button>
-        <button type="button" class="icon sm" data-act="next" aria-label="Next">›</button>
-        <span class="kuiper-cal-title">${esc(title)}</span>
-      </div>
-      <button type="button" class="pill sm kuiper-cal-unscheduled" id="kuiperCalUnscheduled" hidden>
-        ${esc(tr('calendarUnscheduled'))} (<span id="kuiperCalUnschedCount">0</span>)
-      </button>`;
+      </div>`;
     shell.append(toolbar);
     const body = document.createElement('div');
-    body.className = 'kuiper-cal-body kuiper-scroll';
+    body.className = mode() === 'day' ? 'kuiper-cal-body kuiper-scroll' : 'kuiper-cal-body';
     shell.append(body);
     host.append(shell);
 
@@ -366,25 +618,25 @@ const KuiperCalendar = (() => {
       body.append(empty);
     }
 
-    const unsched = unscheduledCount();
-    const unBtn = toolbar.querySelector('#kuiperCalUnscheduled');
-    const unCount = toolbar.querySelector('#kuiperCalUnschedCount');
-    if (unBtn && unCount) {
-      unCount.textContent = String(unsched);
-      unBtn.hidden = unsched === 0;
-      unBtn.onclick = () => ctx.toast?.(tr('calendarUnscheduledHint'));
-    }
-
     toolbar.querySelectorAll('[data-mode]').forEach(btn => {
       btn.onclick = () => setMode(btn.dataset.mode);
     });
     toolbar.querySelector('[data-act="prev"]').onclick = () => shiftAnchor(-1);
     toolbar.querySelector('[data-act="next"]').onclick = () => shiftAnchor(1);
     toolbar.querySelector('[data-act="today"]').onclick = () => goToday();
+    bindPeriodPicker(toolbar);
+
+    if (reopenPeriodPicker) {
+      reopenPeriodPicker = false;
+      const pop = toolbar.querySelector('.kuiper-cal-period-pop');
+      const btn = toolbar.querySelector('.kuiper-cal-period-btn');
+      if (pop && btn && mode() !== 'day') openPeriodPop(btn, pop);
+    }
   }
 
   function init(hooks) {
     ctx = hooks;
+    ensureDatePicker();
   }
 
   return { init, render };

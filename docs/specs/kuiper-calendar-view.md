@@ -52,10 +52,40 @@ flowchart LR
 ├─────────────────────────────────────────────────────────────┤
 │ Cabecera días de la semana (en vista mes/semana)            │
 ├─────────────────────────────────────────────────────────────┤
-│ Cuadrícula de celdas (scroll vertical en mes)               │
+│ Cuadrícula de celdas (scroll según §3.2)                    │
 │  · chips de issue por día                                   │
-│  · barras multi-día en vista semana/mes                     │
+│  · barras multi-día solo en vista mes (§7.1)                │
 └─────────────────────────────────────────────────────────────┘
+```
+
+### 3.1 Columnas de igual ancho
+
+En vistas **mes** y **semana**, las 7 columnas (lun–dom) comparten **el mismo ancho**:
+
+| Regla | Detalle |
+| --- | --- |
+| Grid | `grid-template-columns: repeat(7, minmax(0, 1fr))` (o equivalente) |
+| Celdas | Mismo ancho en cabecera y cuerpo; sin columna fija de etiquetas de issue |
+| Contenido | Chips con `text-overflow: ellipsis`; no forzar ancho mínimo por título |
+
+### 3.2 Adaptación al ancho y scroll
+
+| Regla | Detalle |
+| --- | --- |
+| Contenedor | `.kuiper-cal-body` ocupa el ancho disponible del shell |
+| Expansión | La cuadrícula **crece** con el viewport hasta el mínimo por columna |
+| Mínimo por columna | `--cal-col-min: 96px` (ajustable en `styles.css`; densidad `compact` puede bajar a 80px) |
+| Ancho mínimo total | `7 × --cal-col-min` + gaps + padding → debajo de eso aparece **scroll horizontal** |
+| Scroll vertical | Vista mes: scroll vertical en cuerpo cuando las filas superan la altura |
+| Estilo scroll | Clase `.kuiper-scroll` en el contenedor que hace scroll (ver [`design-system.md`](../design-system.md) §12) |
+| Prohibido | Scrollbars ad hoc distintas a `.kuiper-scroll` / column body del design system |
+
+```mermaid
+flowchart LR
+  subgraph viewport [Ancho disponible]
+    WIDE["≥ 7 × col-min"] --> FLUID["Columnas 1fr iguales"]
+    NARROW["< 7 × col-min"] --> HSCROLL["overflow-x: auto + kuiper-scroll"]
+  end
 ```
 
 ---
@@ -64,21 +94,62 @@ flowchart LR
 
 | Modo | Pref `calendarMode` | Descripción |
 | --- | --- | --- |
-| **Mes** | `'month'` | Cuadrícula 7×5/6; día actual resaltado |
-| **Semana** | `'week'` | 7 columnas; más altura por issue |
-| **Día** | `'day'` | Una columna; lista temporal opcional |
+| **Mes** | `'month'` | Cuadrícula 7×5/6; día actual resaltado; barras multi-día por fila semanal |
+| **Semana** | `'week'` | **7 columnas de día** con chips apilados (paridad visual con vista día, §4.2) |
+| **Día** | `'day'` | Una columna; listas por grupo |
 
 Default: `'month'`.
 
-### 4.1 Navegación temporal
+### 4.1 Navegación temporal (por modo)
 
-| Control | Efecto |
+Controles comunes en `.kuiper-cal-nav`:
+
+| Control | Todos los modos |
 | --- | --- |
-| `←` / `→` | Periodo anterior/siguiente |
-| **Hoy** | Ancla en día actual (Santiago) |
-| Título clickable | En mes: picker mes/año (dropdown); en semana: ir a mes |
+| `←` / `→` | Periodo anterior / siguiente (mes, semana o día según modo) |
+| **Hoy** | Ancla en día actual (`BoardCore.ymd()`, Santiago) |
 
-Pref: `calendarAnchorDate` (`YYYY-MM-DD`).
+Selector de periodo (sustituye el título estático actual):
+
+| Modo | Selector | Comportamiento |
+| --- | --- | --- |
+| **Mes** | Mes + año | Botón título abre popover/dropdown: select mes, select año; **Aplicar** actualiza `calendarAnchorDate` al día 1 del mes elegido (o mantiene día si sigue en el mismo mes) |
+| **Semana** | Semana ISO | Botón título muestra rango `lun 15 – dom 21 sep 2026`; abre picker: input semana (ISO week + año) o mini-calendario con semana resaltada |
+| **Día** | Fecha exacta | Botón título muestra fecha larga; abre `<input type="date">` nativo o picker reutilizando `KuiperDateTimePicker` en modo solo fecha |
+
+| Tecla | Efecto |
+| --- | --- |
+| Flechas en cuadrícula | Navegar entre celdas (mes/semana) |
+| `Enter` en celda | Abrir primer issue o crear |
+
+Pref: `calendarAnchorDate` (`YYYY-MM-DD`). En modo semana, la ancla es **cualquier día** de la semana visible; al navegar se normaliza al lunes de esa semana.
+
+Claves i18n nuevas: `calendarPickMonth`, `calendarPickWeek`, `calendarPickDay`, `calendarWeekRange`, `calendarApply`.
+
+### 4.2 Vista semana ≠ Gantt
+
+**Corrección respecto a implementación v1:** la vista semana **no** es una fila por issue con barras horizontales (`kuiper-cal-bar-row`). Ese patrón pertenece a la vista **Gantt** (`kuiper-gantt-view.md`).
+
+Vista semana correcta:
+
+```
+┌──────┬──────┬──────┬──────┬──────┬──────┬──────┐
+│ lun  │ mar  │ mié  │ jue  │ vie  │ sáb  │ dom  │
+├──────┼──────┼──────┼──────┼──────┼──────┼──────┤
+│ chip │ chip │      │ chip │      │      │      │
+│ chip │      │ chip │      │      │      │      │
+└──────┴──────┴──────┴──────┴──────┴──────┴──────┘
+```
+
+| Regla | Detalle |
+| --- | --- |
+| Estructura | Misma que vista día: **columna por día**, chips apilados verticalmente |
+| Issue multi-día | Chip **repetido** en cada día del rango (no barra continua) |
+| Agrupación | Cabecera de grupo compacta dentro de cada celda (como mes) |
+| Densidad | Sin límite estricto de chips (scroll vertical por columna si hace falta) |
+| Drag | Chip desde un día a otro (misma semántica que mes/día) |
+
+**Prohibido en vista semana:** `kuiper-cal-bar`, `kuiper-cal-bar-track`, `spanWeekRows` para render (reservado a Gantt y barras de mes).
 
 ---
 
@@ -109,7 +180,7 @@ Reutilizar los mismos modos que el tablero:
 | `epic` | Secciones por épica |
 | `priority` | Secciones por nivel de prioridad |
 
-En vista **mes**, cada celda agrupa chips por sección (cabecera compacta dentro de la celda si hay varios grupos). En vista **semana**, filas «all-day» por grupo (análogo a swimlanes horizontales). En vista **día**, listas apiladas por grupo.
+En vista **mes** y **semana**, cada celda agrupa chips por sección (cabecera compacta dentro de la celda si hay varios grupos). En vista **día**, listas apiladas por grupo en una sola columna.
 
 La clave `__none__` para proyecto/épica sin asignar se comporta igual que en swimlanes del tablero.
 
@@ -133,7 +204,7 @@ Issue visible en día `D` si:
 
 ### 6.2 Issues sin fechas
 
-No aparecen en cuadrícula. Enlace discreto en rail: **«Sin planificar (N)»** → panel lateral o modal lista (click abre editor). El contador respeta los filtros activos.
+No aparecen en calendario ni en contadores del rail. Para planificarlas, usar el tablero o el editor.
 
 ---
 
@@ -150,16 +221,20 @@ flowchart TB
   end
   R --> BAR["Barra multi-día (semana/mes) o chip por día (mes denso)"]
   S --> CHIP1["Chip 1 día · borde sólido"]
-  E --> CHIP2["Chip 1 día · borde punteado o icono ◆"]
+  E --> CHIP2["Chip 1 día · rombo milestone ◆"]
 ```
 
 | Tipo | Vista mes | Vista semana | Vista día |
 | --- | --- | --- | --- |
-| Rango | Barra continua en fila de la semana (estilo «all-day») | Barra por fila de issue | Bloque horario «todo el día» |
+| Rango | Barra continua en fila de la semana (estilo «all-day») | Chip en **cada día** del rango | Chip |
 | Solo inicio | Chip compacto | Chip | Chip |
-| Solo deadline | Chip + indicador deadline | Igual | Igual |
+| Solo deadline | Chip con estilo milestone (§7.1.1) | Igual | Igual |
 
 **Color:** proyecto (`ENTITY_COLORS`). **Texto:** `VIBE-5` mono + título truncado.
+
+#### 7.1.1 Milestone (solo deadline)
+
+Issues con **solo** `schedule_end_date` (sin `schedule_start_date`) se muestran **como chip de un día** (mismo borde sólido que el resto) y llevan un **rombo** (`.kuiper-cal-chip-milestone`, coherente con Gantt). No usar borde punteado.
 
 ### 7.2 Densidad y overflow
 
@@ -175,7 +250,17 @@ Celda con borde `--accent-dim`; número del día en `--accent`.
 
 ### 7.4 Fin de semana
 
-Fondo `--surface-2` muy sutil (opcional, respeta tema).
+Sábado y domingo (columnas 6 y 7, semana empezando en lunes) **deben** verse distintos del lunes–viernes:
+
+| Elemento | Clase | Estilo |
+| --- | --- | --- |
+| Celda mes / semana | `.kuiper-cal-cell.is-weekend`, `.kuiper-cal-week-col.is-weekend` | Fondo `color-mix(in srgb, var(--surface-2) 55%, var(--surface-1))` |
+| Cabecera día | `.kuiper-cal-head .is-weekend` | Texto `--muted` (sin cambiar peso) |
+| Hoy en fin de semana | `.is-today.is-weekend` | Prioridad al resaltado de hoy (`--accent-dim`); el tinte fin de semana se mezcla por debajo |
+
+Detección: `new Date(day + 'T12:00:00Z').getUTCDay()` ∈ `{0, 6}` (domingo, sábado).
+
+Coherencia con Gantt: mismo criterio de fin de semana que `--gantt-day-weekend` en espíritu, adaptado a tokens del calendario.
 
 ---
 
@@ -219,7 +304,7 @@ Abre editor tras crear (igual que tablero).
 | Mes/año en título | `septiembre 2026` / `September 2026` |
 | Fechas en chips | Mono solo para ID; fechas en fuente UI |
 
-Claves i18n nuevas: `calendarToday`, `calendarMonth`, `calendarWeek`, `calendarDay`, `calendarUnscheduled`, `calendarMore`, `calendarCreateOnDay`.
+Claves i18n: `calendarToday`, `calendarMonth`, `calendarWeek`, `calendarDay`, `calendarUnscheduled`, `calendarMore`, `calendarCreateOnDay`, `calendarPickMonth`, `calendarPickWeek`, `calendarPickDay`, `calendarWeekRange`, `calendarApply`.
 
 ---
 
@@ -253,7 +338,8 @@ Touch: `(hover: none)` — sin hover-only tooltips; tap largo = tooltip.
 | `calendarWeekDays(anchorDate)` | 7 días desde lunes |
 | `issuesForDay(tasks, day)` | Lista ordenada (prioridad desc, luego start) |
 | `moveScheduleByDays(issue, delta)` | Nuevo par start/end tras drag |
-| `spanWeekRows(issue, weekStart)` | Para barras multi-día en fila semanal |
+| `spanWeekRows(issue, weekStart)` | Solo vista **mes** (barras) y **Gantt**; no vista semana calendario |
+| `isWeekendYmd(day)` | `true` si sábado o domingo |
 
 **Tests:** mes con 28/29/30/31 días, issue que cruza meses, solo deadline, drag +7 días.
 
@@ -291,8 +377,29 @@ Touch: `(hover: none)` — sin hover-only tooltips; tap largo = tooltip.
 | Requisito | Test |
 | --- | --- |
 | Solo deadline visible | `issuesForDay` con solo `end` |
-| Issue rango cruza semana | `spanWeekRows` |
+| Chip milestone lleva rombo | Fixture render: `!start && end` → `.is-milestone` + rombo |
+| Issue rango cruza semana (mes) | `spanWeekRows` |
+| Vista semana: chip por día, no barra | `issuesForDay` × 7 días; sin `kuiper-cal-bar` en week HTML |
+| Fin de semana | `isWeekendYmd('2026-09-19')` true (sáb); lun–vie false |
+| Columnas igual ancho | CSS/DOM: 7 columnas `1fr` en head y row |
+| Scroll bajo mínimo | Contenedor con `min-width: calc(7 * var(--cal-col-min))` |
+| Navegación mes ±1 | `shiftAnchor(-1)` en modo month cambia mes |
+| Picker mes/año | Cambiar a marzo 2027 actualiza `calendarAnchorDate` |
+| Picker semana | Ancla en cualquier día de semana ISO 38 → lunes 14 sep |
+| Picker día | Input fecha → `calendarAnchorDate` exacto |
 | Drag mueve rango | `moveScheduleByDays(issue, +3)` |
 | Filtros compartidos | Integración: filtrar proyecto oculta chip |
 | Agrupación por proyecto | Render mes con `groupBy: project` muestra secciones |
 | Paridad filtros con tablero | Cambiar filtro en calendario persiste al volver a board |
+
+---
+
+## 17. Deuda conocida (v1 actual → esta spec)
+
+| Gap | Estado actual | Objetivo |
+| --- | --- | --- |
+| Vista semana tipo Gantt | `renderWeek` usa `kuiper-cal-bar-row` | Reescribir como 7 columnas con chips (§4.2) |
+| Fin de semana | Sin clase `is-weekend` | §7.4 |
+| Columnas fluidas + scroll | `repeat(7, 1fr)` sin mínimo | §3.1–3.2 |
+| Selectores mes/semana/día | Solo título texto + ← → | §4.1 pickers |
+| Borde punteado | Implementado; sin doc visible | §7.1.1 (documentado) |

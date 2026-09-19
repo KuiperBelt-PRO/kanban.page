@@ -1366,6 +1366,26 @@ test('validateSchedule accepts partial dates and rejects invalid range', () => {
   assert.equal(C.validateSchedule('2026-09-10', null).ok, true);
 });
 
+test('isWeekendYmd flags Saturday and Sunday only', () => {
+  assert.equal(C.isWeekendYmd('2026-09-19'), true); // Saturday
+  assert.equal(C.isWeekendYmd('2026-09-20'), true); // Sunday
+  assert.equal(C.isWeekendYmd('2026-09-18'), false); // Friday
+  assert.equal(C.isWeekendYmd('2026-09-21'), false); // Monday
+});
+
+test('isoWeekFromYmd and mondayOfIsoWeek round-trip', () => {
+  const { year, week } = C.isoWeekFromYmd('2026-09-14');
+  assert.equal(C.mondayOfIsoWeek(year, week), '2026-09-14');
+  assert.equal(C.isoWeekInputValue('2026-09-16'), `${year}-W${String(week).padStart(2, '0')}`);
+});
+
+test('calendarWeekDays always returns Monday through Sunday', () => {
+  const days = C.calendarWeekDays('2026-09-19');
+  assert.equal(days.length, 7);
+  assert.equal(days[0], '2026-09-14');
+  assert.equal(days[6], '2026-09-20');
+});
+
 test('issueOnDay handles range, start-only and deadline', () => {
   const range = { scheduleStartDate: '2026-09-10', scheduleEndDate: '2026-09-12' };
   assert.equal(C.issueOnDay(range, '2026-09-11'), true);
@@ -1382,6 +1402,30 @@ test('scheduleBoundsForTasks returns min start and max end', () => {
     { scheduleStartDate: '2026-09-05', scheduleEndDate: '2026-09-20' },
   ]), { start: '2026-09-05', end: '2026-09-20' });
   assert.equal(C.scheduleBoundsForTasks([{ scheduleStartDate: null, scheduleEndDate: null }]), null);
+});
+
+test('cascadeEndResize shifts blocking successors by end delta', () => {
+  const tasks = [
+    { id: 'a', scheduleStartDate: '2026-09-01', scheduleEndDate: '2026-09-10', blocks: [{ id: 'b' }] },
+    { id: 'b', scheduleStartDate: '2026-09-11', scheduleEndDate: '2026-09-15', blocks: [{ id: 'c' }] },
+    { id: 'c', scheduleStartDate: '2026-09-16', scheduleEndDate: '2026-09-18' },
+  ];
+  const graph = C.buildBlockingGraph(tasks);
+  const extend = C.cascadeEndResize(tasks, graph, 'a', '2026-09-15');
+  assert.equal(extend.cycle, false);
+  assert.deepEqual(extend.patches.find(p => p.id === 'a'), {
+    id: 'a', schedule_start_date: '2026-09-01', schedule_end_date: '2026-09-15',
+  });
+  assert.deepEqual(extend.patches.find(p => p.id === 'b'), {
+    id: 'b', schedule_start_date: '2026-09-16', schedule_end_date: '2026-09-20',
+  });
+  assert.deepEqual(extend.patches.find(p => p.id === 'c'), {
+    id: 'c', schedule_start_date: '2026-09-21', schedule_end_date: '2026-09-23',
+  });
+  const shrink = C.cascadeEndResize(tasks, graph, 'a', '2026-09-05');
+  assert.deepEqual(shrink.patches.find(p => p.id === 'b'), {
+    id: 'b', schedule_start_date: '2026-09-06', schedule_end_date: '2026-09-10',
+  });
 });
 
 test('cascadeScheduleMove shifts blocking successors recursively', () => {

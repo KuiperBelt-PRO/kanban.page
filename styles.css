@@ -2473,81 +2473,49 @@ html[data-kuiper="1"] .board:not(.kuiper-swimlanes) > .col:not(.ghost-col) {
   background: color-mix(in srgb, var(--faint) 38%, transparent);
 }
 
-/* Scroll del área de notas: ancho fijo para que el hover no estreche el contenido */
-.kuiper-notes-wrap.kuiper-scroll,
-.kuiper-issue-scroll.kuiper-scroll,
-.kuiper-picker-time-col.kuiper-scroll,
-.kuiper-comment-list-scroll.kuiper-scroll,
-.kuiper-linked-groups.kuiper-scroll,
+/* Scrollbars in-app: ocultos hasta hover (calendario, editor, picker, etc.) */
+.kuiper-scroll,
 .kuiper-comment-form textarea,
 .kuiper-comment-edit-input {
   scrollbar-gutter: stable;
   scrollbar-width: thin;
   scrollbar-color: transparent transparent;
 }
-.kuiper-notes-wrap.kuiper-scroll:hover,
-.kuiper-issue-scroll.kuiper-scroll:hover,
-.kuiper-picker-time-col.kuiper-scroll:hover,
-.kuiper-comment-list-scroll.kuiper-scroll:hover,
-.kuiper-linked-groups.kuiper-scroll:hover,
+.kuiper-scroll:hover,
 .kuiper-comment-form textarea:hover,
 .kuiper-comment-form textarea:focus,
 .kuiper-comment-edit-input:hover,
 .kuiper-comment-edit-input:focus {
   scrollbar-color: color-mix(in srgb, var(--faint) 44%, transparent) transparent;
 }
-.kuiper-notes-wrap.kuiper-scroll::-webkit-scrollbar,
-.kuiper-issue-scroll.kuiper-scroll::-webkit-scrollbar,
-.kuiper-picker-time-col.kuiper-scroll::-webkit-scrollbar,
-.kuiper-comment-list-scroll.kuiper-scroll::-webkit-scrollbar,
-.kuiper-linked-groups.kuiper-scroll::-webkit-scrollbar,
+.kuiper-scroll::-webkit-scrollbar,
 .kuiper-comment-form textarea::-webkit-scrollbar,
 .kuiper-comment-edit-input::-webkit-scrollbar {
   width: 3px;
   height: 3px;
 }
-.kuiper-notes-wrap.kuiper-scroll::-webkit-scrollbar-track,
-.kuiper-notes-wrap.kuiper-scroll::-webkit-scrollbar-corner,
-.kuiper-issue-scroll.kuiper-scroll::-webkit-scrollbar-track,
-.kuiper-issue-scroll.kuiper-scroll::-webkit-scrollbar-corner,
-.kuiper-picker-time-col.kuiper-scroll::-webkit-scrollbar-track,
-.kuiper-picker-time-col.kuiper-scroll::-webkit-scrollbar-corner,
-.kuiper-comment-list-scroll.kuiper-scroll::-webkit-scrollbar-track,
-.kuiper-comment-list-scroll.kuiper-scroll::-webkit-scrollbar-corner,
-.kuiper-linked-groups.kuiper-scroll::-webkit-scrollbar-track,
-.kuiper-linked-groups.kuiper-scroll::-webkit-scrollbar-corner,
+.kuiper-scroll::-webkit-scrollbar-track,
+.kuiper-scroll::-webkit-scrollbar-corner,
 .kuiper-comment-form textarea::-webkit-scrollbar-track,
 .kuiper-comment-form textarea::-webkit-scrollbar-corner,
 .kuiper-comment-edit-input::-webkit-scrollbar-track,
 .kuiper-comment-edit-input::-webkit-scrollbar-corner {
   background: transparent;
 }
-.kuiper-notes-wrap.kuiper-scroll::-webkit-scrollbar-thumb,
-.kuiper-issue-scroll.kuiper-scroll::-webkit-scrollbar-thumb,
-.kuiper-picker-time-col.kuiper-scroll::-webkit-scrollbar-thumb,
-.kuiper-comment-list-scroll.kuiper-scroll::-webkit-scrollbar-thumb,
-.kuiper-linked-groups.kuiper-scroll::-webkit-scrollbar-thumb,
+.kuiper-scroll::-webkit-scrollbar-thumb,
 .kuiper-comment-form textarea::-webkit-scrollbar-thumb,
 .kuiper-comment-edit-input::-webkit-scrollbar-thumb {
   background: transparent;
   border-radius: 99px;
 }
-.kuiper-notes-wrap.kuiper-scroll:hover::-webkit-scrollbar-thumb,
-.kuiper-issue-scroll.kuiper-scroll:hover::-webkit-scrollbar-thumb,
-.kuiper-picker-time-col.kuiper-scroll:hover::-webkit-scrollbar-thumb,
-.kuiper-comment-list-scroll.kuiper-scroll:hover::-webkit-scrollbar-thumb,
-.kuiper-linked-groups.kuiper-scroll:hover::-webkit-scrollbar-thumb,
+.kuiper-scroll:hover::-webkit-scrollbar-thumb,
 .kuiper-comment-form textarea:hover::-webkit-scrollbar-thumb,
 .kuiper-comment-form textarea:focus::-webkit-scrollbar-thumb,
 .kuiper-comment-edit-input:hover::-webkit-scrollbar-thumb,
 .kuiper-comment-edit-input:focus::-webkit-scrollbar-thumb {
   background: color-mix(in srgb, var(--faint) 44%, transparent);
 }
-.kuiper-notes-wrap.kuiper-scroll::-webkit-scrollbar-button,
-.kuiper-issue-scroll.kuiper-scroll::-webkit-scrollbar-button,
-.kuiper-picker-time-col.kuiper-scroll::-webkit-scrollbar-button,
-.kuiper-comment-list-scroll.kuiper-scroll::-webkit-scrollbar-button,
-.kuiper-linked-groups.kuiper-scroll::-webkit-scrollbar-button,
+.kuiper-scroll::-webkit-scrollbar-button,
 .kuiper-comment-form textarea::-webkit-scrollbar-button,
 .kuiper-comment-edit-input::-webkit-scrollbar-button {
   display: none;
@@ -3560,6 +3528,12 @@ html[data-kuiper="1"] .board:not(.kuiper-swimlanes) > .col:not(.ghost-col) {
   pointer-events: none;
 }
 #kuiperPickerLayer:not([hidden]) { pointer-events: auto; }
+#kuiperPickerLayer.is-inline {
+  pointer-events: none;
+}
+#kuiperPickerLayer.is-inline .kuiper-picker-pop {
+  pointer-events: auto;
+}
 .kuiper-picker-scrim {
   position: absolute;
   inset: 0;
@@ -4122,32 +4096,145 @@ header.rail .kuiper-view-tabs {
 
 /* ── Calendar view ────────────────────────────────────── */
 .board.kuiper-calendar {
-  display: block;
-  overflow: auto;
+  --cal-col-min: 96px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   padding: 12px 14px 18px;
+  min-height: 0;
 }
-.kuiper-cal-shell { display: flex; flex-direction: column; gap: 12px; min-height: 100%; }
+html[data-density="compact"] .board.kuiper-calendar { --cal-col-min: 80px; }
+.kuiper-cal-shell { display: flex; flex-direction: column; gap: 12px; flex: 1; min-height: 0; }
 .kuiper-cal-toolbar {
-  display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px; flex-shrink: 0;
+  overflow: visible;
+  position: relative;
+  z-index: 2;
 }
-.kuiper-cal-nav { display: flex; align-items: center; gap: 6px; }
-.kuiper-cal-title { font-weight: 600; margin-left: 8px; }
-.kuiper-cal-body { flex: 1; min-height: 320px; }
-.kuiper-cal-grid { display: flex; flex-direction: column; gap: 4px; }
-.kuiper-cal-head, .kuiper-cal-row { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.kuiper-cal-nav { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.kuiper-cal-period-nav {
+  display: inline-flex; align-items: center; gap: 2px;
+  padding: 2px; border-radius: 999px;
+  border: 1px solid var(--line); background: var(--raise);
+  overflow: visible;
+}
+.kuiper-cal-period-nav[data-period="month"] .kuiper-cal-period-btn { width: 8.25rem; }
+.kuiper-cal-period-nav[data-period="week"] .kuiper-cal-period-btn { width: 9.75rem; }
+.kuiper-cal-period-nav[data-period="day"] .kuiper-cal-period-btn { width: 10.75rem; }
+.kuiper-cal-step {
+  width: 30px; height: 30px;
+  color: var(--text); background: transparent;
+  border: 1px solid transparent;
+}
+.kuiper-cal-step:hover { background: var(--raise-hi); border-color: var(--line-hi); color: var(--text); }
+.kuiper-cal-period { position: relative; display: inline-block; }
+.kuiper-cal-period-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+  padding: 4px 6px;
+  border-radius: 999px; border: none; background: transparent;
+  font: 600 13px/1.2 var(--ui); color: var(--text);
+  transition: background .16s, color .16s;
+  flex-shrink: 0;
+}
+.kuiper-cal-period-btn:hover { background: var(--raise-hi); }
+.kuiper-cal-period-label {
+  flex: 1; min-width: 0;
+  text-align: center;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.kuiper-cal-period-btn svg {
+  width: 14px; height: 14px; flex: none; color: var(--faint);
+  transition: transform .22s var(--ease), color .16s;
+}
+.kuiper-cal-period-btn:hover svg { color: var(--muted); }
+.kuiper-cal-period-btn[aria-expanded="true"] svg { transform: rotate(180deg); color: var(--text); }
+.kuiper-cal-period-pop {
+  position: fixed; top: 0; left: 0;
+  width: max-content; min-width: 0; padding: 8px;
+  transform: translateX(-50%);
+  z-index: 110;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+  box-shadow: var(--sh-2); transform-origin: top center;
+  animation: kuiperCalPopIn .16s var(--ease) both;
+}
+@keyframes kuiperCalPopIn {
+  from { opacity: 0; transform: translateX(-50%) translateY(-4px); }
+  to { opacity: 1; transform: translateX(-50%); }
+}
+.kuiper-cal-picker-month { display: flex; flex-direction: column; gap: 8px; width: 232px; }
+.kuiper-cal-year-step {
+  display: flex; align-items: center; justify-content: space-between; gap: 6px;
+  padding: 2px 4px;
+}
+.kuiper-cal-year-label {
+  font: 500 14px/1 var(--mono); letter-spacing: .04em; color: var(--text);
+}
+.kuiper-cal-month-grid {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px;
+}
+.kuiper-cal-month-opt {
+  padding: 7px 4px; border-radius: 7px; border: none;
+  font: 500 12px/1 var(--ui); color: var(--muted);
+  background: transparent; transition: color .14s, background .14s;
+}
+.kuiper-cal-month-opt:hover { color: var(--text); background: var(--raise); }
+.kuiper-cal-month-opt.is-active {
+  color: var(--accent-ink); background: var(--accent-fill);
+}
+.kuiper-cal-picker-week { display: flex; flex-direction: column; gap: 8px; width: 248px; }
+.kuiper-cal-week-list {
+  display: flex; flex-direction: column; gap: 2px;
+  max-height: 240px; overflow-y: auto; margin: 0 -2px; padding: 0 2px;
+}
+.kuiper-cal-week-opt {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 7px 10px; border: none; border-radius: 7px;
+  background: transparent; color: var(--muted); text-align: left; cursor: pointer;
+  font: 400 12px/1.25 var(--ui);
+  transition: color .14s, background .14s;
+}
+.kuiper-cal-week-opt:hover { color: var(--text); background: var(--raise); }
+.kuiper-cal-week-opt.is-active { color: var(--accent-ink); background: var(--accent-fill); }
+.kuiper-cal-week-num {
+  font: 500 10px/1 var(--mono); letter-spacing: .04em;
+  color: var(--faint); min-width: 2.2rem; flex-shrink: 0;
+}
+.kuiper-cal-week-opt.is-active .kuiper-cal-week-num { color: color-mix(in srgb, var(--accent-ink) 72%, transparent); }
+.kuiper-cal-week-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kuiper-cal-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.kuiper-cal-body.kuiper-scroll { overflow: auto; }
+.kuiper-cal-scroll-wrap { flex: 1; min-height: 0; overflow: auto; }
+.kuiper-cal-grid {
+  display: flex; flex-direction: column; gap: 4px;
+  min-width: calc(7 * var(--cal-col-min) + 6 * 4px);
+}
+.kuiper-cal-head, .kuiper-cal-row {
+  display: grid; grid-template-columns: repeat(7, minmax(var(--cal-col-min), 1fr)); gap: 4px;
+}
 .kuiper-cal-head span {
-  font-size: 11px; color: var(--muted); text-transform: lowercase; padding: 0 4px;
+  font-size: 11px; color: var(--muted); text-transform: lowercase; padding: 0 4px; text-align: center;
 }
+.kuiper-cal-head .is-weekend { color: var(--muted); }
 .kuiper-cal-cell {
   min-height: 92px; border: 1px solid var(--border); border-radius: 8px;
   background: var(--surface-1); padding: 6px; display: flex; flex-direction: column; gap: 4px;
+  min-width: 0;
+}
+.kuiper-cal-cell.is-weekend {
+  background: color-mix(in srgb, var(--surface-2) 55%, var(--surface-1));
 }
 .kuiper-cal-cell.is-pad { background: transparent; border-color: transparent; }
 .kuiper-cal-cell.is-today { border-color: var(--accent-dim); box-shadow: inset 0 0 0 1px var(--accent-dim); }
-.kuiper-cal-cell.is-drop-target, .kuiper-cal-week-col.is-drop-target {
+.kuiper-cal-cell.is-today.is-weekend {
+  background: color-mix(in srgb, var(--accent-dim) 40%, color-mix(in srgb, var(--surface-2) 55%, var(--surface-1)));
+}
+.kuiper-cal-cell.is-drop-target {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
+.kuiper-cal-week-cell { min-height: 280px; }
+.kuiper-cal-week-row { flex: 1; align-items: stretch; }
+.kuiper-cal-cell-body { display: flex; flex-direction: column; gap: 4px; flex: 1; min-height: 0; overflow-y: auto; }
 .kuiper-cal-daynum { font-size: 12px; font-weight: 600; color: var(--muted); }
 .kuiper-cal-cell.is-today .kuiper-cal-daynum { color: var(--accent); }
 .kuiper-cal-group { font-size: 10px; color: var(--faint); margin-top: 2px; }
@@ -4157,25 +4244,22 @@ header.rail .kuiper-view-tabs {
   background: color-mix(in srgb, var(--c, var(--accent)) 18%, transparent);
   border-radius: 4px; padding: 2px 6px; font-size: 11px; text-align: left; cursor: pointer;
 }
-.kuiper-cal-chip.is-deadline { border-style: dashed; }
-.kuiper-cal-chip-id { font-family: var(--mono); font-size: 10px; opacity: 0.85; }
-.kuiper-cal-chip-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kuiper-cal-chip-milestone {
+  width: 7px; height: 7px; flex: none;
+  transform: rotate(45deg); border-radius: 1px;
+  background: var(--c, var(--accent));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--c, var(--accent)) 35%, transparent);
+}
+.kuiper-cal-chip-id { font-family: var(--mono); font-size: 10px; opacity: 0.85; flex-shrink: 0; }
+.kuiper-cal-chip-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .kuiper-cal-more {
   border: none; background: none; color: var(--accent); font-size: 11px; cursor: pointer; padding: 0 4px;
 }
-.kuiper-cal-week-head {
-  display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; margin-bottom: 8px;
-}
-.kuiper-cal-week-col { text-align: center; font-size: 12px; color: var(--muted); padding: 6px; border-radius: 6px; }
-.kuiper-cal-week-col.is-today { color: var(--accent); background: var(--accent-dim); }
-.kuiper-cal-bar-row { display: grid; grid-template-columns: 120px 1fr; gap: 8px; margin-bottom: 6px; align-items: center; }
-.kuiper-cal-bar-label { font-family: var(--mono); font-size: 11px; color: var(--muted); }
-.kuiper-cal-bar-track { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
-.kuiper-cal-bar {
-  border: none; border-radius: 4px; background: color-mix(in srgb, var(--c) 75%, transparent);
-  color: var(--text); font-size: 11px; padding: 4px 6px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
-}
-.kuiper-cal-bar.is-deadline { border: 1px dashed var(--c); background: transparent; }
+.kuiper-cal-day-view { max-width: 640px; }
+.kuiper-cal-day-title { margin: 0 0 12px; font-size: 18px; font-weight: 600; }
+.kuiper-cal-day-section { margin-bottom: 16px; }
+.kuiper-cal-day-section h4 { margin: 0 0 8px; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.kuiper-cal-day-list { display: flex; flex-direction: column; gap: 6px; }
 .kuiper-cal-empty { color: var(--muted); font-size: 13px; padding: 12px 4px; }
 .kuiper-cal-empty-banner { text-align: center; padding: 16px 8px; }
 .kuiper-gantt-empty {
@@ -4193,7 +4277,6 @@ header.rail .kuiper-view-tabs {
   display: flex; flex-direction: column; gap: 12px; flex: 1; min-height: 0;
 }
 .kuiper-gantt-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; flex-shrink: 0; }
-.kuiper-gantt-deps-toggle { font-size: 12px; color: var(--muted); display: inline-flex; align-items: center; gap: 6px; }
 .kuiper-gantt-main {
   border: 1px solid var(--border); border-radius: 12px; overflow: hidden; flex: 1; min-height: 0;
   background: var(--surface-1); box-shadow: inset 0 1px 0 color-mix(in srgb, var(--border) 40%, transparent);
@@ -4405,6 +4488,10 @@ header.rail .kuiper-view-tabs {
   display: flex;
   flex-direction: column;
 }
+.kuiper-gantt-v2 .kuiper-gantt-shell:focus,
+.kuiper-gantt-v2 .kuiper-gantt-shell:focus-visible {
+  outline: none;
+}
 .kuiper-gantt-v2 .kuiper-gantt-chart-host {
   flex: 1 1 0;
   min-height: 0;
@@ -4431,7 +4518,7 @@ header.rail .kuiper-view-tabs {
   overflow: hidden;
   --gantt-container-border: none;
   --gantt-container-shadow: none;
-  --gantt-row-height: 44px;
+  --gantt-row-height: 32px;
   --gantt-bar-height: 16px;
   --gantt-milestone-size: 12px;
   --gantt-font-size-xs: 10px;
@@ -4469,7 +4556,7 @@ header.rail .kuiper-view-tabs {
 .kuiper-gantt-v2 .gantt-root > div:first-child {
   min-height: 100%;
 }
-.kuiper-gantt-v2 [data-pane="left"] > div:last-child {
+.kuiper-gantt-v2 [data-pane="left"] > div:nth-child(2) {
   min-height: calc(100% - 52px);
 }
 .kuiper-gantt-v2 .kuiper-gantt-nav {
@@ -4487,13 +4574,157 @@ header.rail .kuiper-view-tabs {
   line-height: 1;
 }
 .kuiper-gantt-v2 .gantt-row {
-  font-size: 12px;
+  font-size: 11px;
+  line-height: 1.2;
 }
-/* Altura fija en el grid izquierdo: debe coincidir con ROW_HEIGHT del timeline (44px). */
+.kuiper-gantt-v2 [data-pane="left"] .gantt-row > div {
+  align-items: center;
+  min-height: 0;
+}
+.kuiper-gantt-v2 .kuiper-gantt-key-cell,
+.kuiper-gantt-v2 .kuiper-gantt-issue-cell,
+.kuiper-gantt-v2 .kuiper-gantt-date-cell {
+  overflow: visible;
+}
+.kuiper-gantt-v2 .kuiper-gantt-hover-btn {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease, color 0.12s ease;
+}
+.kuiper-gantt-v2 [data-pane="left"] .gantt-row.kuiper-gantt-card-row:hover .kuiper-gantt-hover-btn,
+.kuiper-gantt-v2 [data-pane="left"] .gantt-row.kuiper-gantt-card-row:focus-within .kuiper-gantt-hover-btn {
+  opacity: 1;
+  pointer-events: auto;
+}
+.kuiper-gantt-v2 .kuiper-gantt-key-cell { padding-right: 2px; }
+.kuiper-gantt-v2 .kuiper-gantt-key-wrap {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+.kuiper-gantt-v2 .kuiper-gantt-key-id {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--muted);
+  font-size: 10px;
+}
+.kuiper-gantt-v2 .kuiper-gantt-key-btn {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  color: var(--muted);
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
+.kuiper-gantt-v2 .kuiper-gantt-key-btn:hover { color: var(--text); }
+.kuiper-gantt-v2 .kuiper-gantt-key-btn svg { width: 13px; height: 13px; }
+.kuiper-gantt-v2 .kuiper-gantt-issue-cell {
+  min-width: 0;
+  overflow: hidden;
+}
+.kuiper-gantt-v2 [data-pane="left"] .gantt-row.kuiper-gantt-card-row:hover .kuiper-gantt-issue-cell,
+.kuiper-gantt-v2 [data-pane="left"] .gantt-row.kuiper-gantt-card-row:focus-within .kuiper-gantt-issue-cell {
+  cursor: pointer;
+}
+.kuiper-gantt-v2 .kuiper-gantt-issue-hover {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  color: var(--accent);
+  display: grid;
+  place-items: center;
+}
+.kuiper-gantt-v2 .kuiper-gantt-issue-hover svg { width: 12px; height: 12px; }
+.kuiper-gantt-v2 [data-pane="left"] .gantt-row.kuiper-gantt-card-row:hover .kuiper-gantt-issue-label,
+.kuiper-gantt-v2 [data-pane="left"] .gantt-row.kuiper-gantt-card-row:focus-within .kuiper-gantt-issue-label {
+  color: var(--accent);
+}
+.kuiper-gantt-v2 .kuiper-gantt-issue-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.kuiper-gantt-v2 .kuiper-gantt-date-cell {
+  display: flex;
+  align-items: center;
+  padding-right: 2px;
+}
+.kuiper-gantt-v2 .kuiper-gantt-date-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  border-radius: 4px;
+  font-size: 10px;
+  line-height: 1.1;
+  padding: 2px 4px;
+  cursor: pointer;
+  max-width: 100%;
+  overflow: hidden;
+  min-width: 0;
+}
+.kuiper-gantt-v2 .kuiper-gantt-date-icon {
+  flex-shrink: 0;
+  width: 12px;
+  height: 12px;
+  display: grid;
+  place-items: center;
+  color: var(--accent);
+}
+.kuiper-gantt-v2 .kuiper-gantt-date-icon svg { width: 11px; height: 11px; }
+.kuiper-gantt-v2 .kuiper-gantt-date-val {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.kuiper-gantt-v2 [data-pane="left"] .gantt-row.kuiper-gantt-card-row:hover .kuiper-gantt-date-btn,
+.kuiper-gantt-v2 [data-pane="left"] .gantt-row.kuiper-gantt-card-row:focus-within .kuiper-gantt-date-btn {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--line));
+  background: color-mix(in srgb, var(--raise) 55%, var(--surface));
+}
+.kuiper-gantt-v2 .gantt-bar .gantt-resize-handle {
+  width: 7px;
+  opacity: 0;
+  background: color-mix(in srgb, #fff 28%, transparent);
+  transition: opacity 0.12s ease;
+}
+.kuiper-gantt-v2 .gantt-bar:hover .gantt-resize-handle,
+.kuiper-gantt-v2 .gantt-bar:active .gantt-resize-handle {
+  opacity: 1;
+}
+.kuiper-gantt-v2 .kuiper-gantt-colzoom {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.kuiper-gantt-v2 .kuiper-gantt-colzoom-label {
+  font-size: 11px;
+  color: var(--muted);
+  min-width: 2.8em;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.kuiper-gantt-v2 .gantt-resize-handle--start {
+  border-radius: 3px 0 0 3px;
+}
+.kuiper-gantt-v2 .gantt-resize-handle--end {
+  border-radius: 0 3px 3px 0;
+}
+/* Altura fija en el grid izquierdo: debe coincidir con ROW_HEIGHT del timeline (32px). */
 .kuiper-gantt-v2 [data-pane="left"] .gantt-row {
-  height: var(--gantt-row-height, 44px) !important;
-  min-height: var(--gantt-row-height, 44px);
-  max-height: var(--gantt-row-height, 44px);
+  height: var(--gantt-row-height, 32px) !important;
+  min-height: var(--gantt-row-height, 32px);
+  max-height: var(--gantt-row-height, 32px);
   box-sizing: border-box;
   margin: 0 !important;
   overflow: hidden;

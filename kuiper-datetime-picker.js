@@ -2,6 +2,7 @@
 const KuiperDateTimePicker = (() => {
   let layer = null;
   let onClose = null;
+  let outsideListener = null;
   let ctx = { tr: k => k, locale: () => 'es' };
 
   const WEEKDAYS = {
@@ -142,11 +143,31 @@ const KuiperDateTimePicker = (() => {
     return layer;
   }
 
+  function removeOutsideListener() {
+    if (!outsideListener) return;
+    document.removeEventListener('click', outsideListener, true);
+    outsideListener = null;
+  }
+
+  function bindOutsideClose(anchor) {
+    removeOutsideListener();
+    outsideListener = e => {
+      const pop = layer?.querySelector('.kuiper-picker-pop');
+      if (!layer || layer.hidden) return;
+      if (pop?.contains(e.target) || anchor?.contains(e.target)) return;
+      close();
+    };
+    requestAnimationFrame(() => document.addEventListener('click', outsideListener, true));
+  }
+
   function close() {
+    removeOutsideListener();
     if (onClose) onClose();
     onClose = null;
     if (layer) {
       layer.hidden = true;
+      layer.classList.remove('is-inline');
+      layer.querySelector('.kuiper-picker-scrim').hidden = false;
       layer.querySelector('.kuiper-picker-body').innerHTML = '';
     }
   }
@@ -191,20 +212,26 @@ const KuiperDateTimePicker = (() => {
     requestAnimationFrame(() => positionPop(anchor, point));
   }
 
-  function openDate({ anchor, value, onPick, clientX, clientY }) {
+  function openDate({ anchor, value, onPick, onDismiss, clientX, clientY, scrim = true }) {
     ensureLayer();
     if (!layer.hidden) close();
     const body = layer.querySelector('.kuiper-picker-body');
     const foot = layer.querySelector('.kuiper-picker-foot');
     const okBtn = layer.querySelector('[data-act="ok"]');
     const cancelBtn = layer.querySelector('[data-act="cancel"]');
+    const scrimEl = layer.querySelector('.kuiper-picker-scrim');
+    const pop = layer.querySelector('.kuiper-picker-pop');
     cancelBtn.textContent = ctx.tr('cancel') || 'Cancel';
     okBtn.textContent = ctx.tr('save') || 'Save';
     foot.hidden = true;
+    scrimEl.hidden = !scrim;
+    layer.classList.toggle('is-inline', !scrim);
+    pop?.setAttribute('aria-modal', scrim ? 'true' : 'false');
 
     let view = parseYmd(value) || parseYmd(todayYmd());
 
     function pickDay(y, mo, d) {
+      onClose = null;
       onPick(toYmd(y, mo, d));
       close();
     }
@@ -253,12 +280,12 @@ const KuiperDateTimePicker = (() => {
       });
     }
 
-    const pop = layer.querySelector('.kuiper-picker-pop');
     layer.hidden = false;
     pop?.classList.remove('is-time');
     render();
     repositionPop(anchor, { clientX, clientY });
-    onClose = () => {};
+    if (!scrim) bindOutsideClose(anchor);
+    onClose = () => { onDismiss?.(); };
   }
 
   function openTime({ anchor, value, onPick, labelKey, clientX, clientY }) {
@@ -542,6 +569,8 @@ const KuiperDateTimePicker = (() => {
   return {
     init,
     close,
+    openDate,
+    openTime,
     mountManualFields,
     mountTimeEntryEdit,
     upgradeManualDom,

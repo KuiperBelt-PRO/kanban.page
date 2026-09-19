@@ -730,15 +730,20 @@ function ceilToScaleBoundary(date, scale, weekStartsOn = 1) {
 * @param viewportStart - The leftmost date visible in the viewport.
 * @returns A {@link PixelMapper} configured for the given viewport.
 */
+let columnWidthMultiplier = 1;
+function setColumnWidthMultiplier(multiplier) {
+	columnWidthMultiplier = Math.max(0.35, Math.min(3, multiplier || 1));
+}
 function createPixelMapper(scale, viewportStart) {
 	const { columnWidth, msPerColumn } = SCALE_CONFIGS[scale];
+	const effectiveColumnWidth = columnWidth * columnWidthMultiplier;
 	const originMs = viewportStart.getTime();
-	const pxPerMs = columnWidth / msPerColumn;
-	const msPerPx = msPerColumn / columnWidth;
+	const pxPerMs = effectiveColumnWidth / msPerColumn;
+	const msPerPx = msPerColumn / effectiveColumnWidth;
 	const msPerDay = 864e5;
 	return {
 		originMs,
-		columnWidth,
+		columnWidth: effectiveColumnWidth,
 		toX(date) {
 			return (date.getTime() - originMs) * pxPerMs;
 		},
@@ -756,9 +761,9 @@ function createPixelMapper(scale, viewportStart) {
 //#endregion
 //#region src/lib/timeline/layoutEngine.ts
 const DENSITY = {
-	rowHeight: 44,
-	barHeight: 28,
-	milestoneSize: 20
+	rowHeight: 32,
+	barHeight: 16,
+	milestoneSize: 12
 };
 const ROW_HEIGHT = DENSITY.rowHeight;
 const BAR_HEIGHT = DENSITY.barHeight;
@@ -2164,14 +2169,14 @@ function toTask(node) {
 * @param cbs - The chart callbacks.
 * @returns A cleanup function that removes all listeners.
 */
-function attachDrag(barEl, resizeHandleEl, task, getMapper, cbs) {
+function attachDrag(barEl, leftResizeHandleEl, rightResizeHandleEl, task, getMapper, cbs) {
 	function onBarDown(e) {
 		if (e.button !== 0) return;
+		if (e.target.closest(".gantt-resize-handle")) return;
 		e.preventDefault();
 		try {
 			barEl.setPointerCapture(e.pointerId);
 		} catch {}
-		cbs.onTaskClick?.(task.id);
 		const startX = e.clientX;
 		const originDate = parseDate(task.startDate);
 		const mapper = getMapper();
@@ -2197,12 +2202,12 @@ function attachDrag(barEl, resizeHandleEl, task, getMapper, cbs) {
 		window.addEventListener("pointermove", onMove);
 		window.addEventListener("pointerup", onUp);
 	}
-	function onResizeDown(e) {
+	function onResizeRightDown(e) {
 		if (e.button !== 0) return;
 		e.preventDefault();
 		e.stopPropagation();
 		try {
-			resizeHandleEl.setPointerCapture(e.pointerId);
+			rightResizeHandleEl.setPointerCapture(e.pointerId);
 		} catch {}
 		const startX = e.clientX;
 		if (task.kind === "milestone") return;
@@ -2229,11 +2234,45 @@ function attachDrag(barEl, resizeHandleEl, task, getMapper, cbs) {
 		window.addEventListener("pointermove", onMove);
 		window.addEventListener("pointerup", onUp);
 	}
+	function onResizeLeftDown(e) {
+		if (e.button !== 0) return;
+		e.preventDefault();
+		e.stopPropagation();
+		try {
+			leftResizeHandleEl.setPointerCapture(e.pointerId);
+		} catch {}
+		const startX = e.clientX;
+		if (task.kind === "milestone") return;
+		const origStart = parseDate(task.startDate);
+		const mapper = getMapper();
+		let lastStart = origStart;
+		function onMove(me) {
+			const dx = me.clientX - startX;
+			const daysDelta = Math.round(mapper.widthToDurationDays(dx));
+			lastStart = addDays(origStart, daysDelta);
+			cbs.onTaskResizeStart?.({
+				id: task.id,
+				startDate: lastStart.toISOString().slice(0, 10)
+			});
+		}
+		function onUp() {
+			window.removeEventListener("pointermove", onMove);
+			window.removeEventListener("pointerup", onUp);
+			cbs._onTaskResizeStartFinal?.({
+				id: task.id,
+				startDate: lastStart.toISOString().slice(0, 10)
+			});
+		}
+		window.addEventListener("pointermove", onMove);
+		window.addEventListener("pointerup", onUp);
+	}
 	barEl.addEventListener("pointerdown", onBarDown);
-	resizeHandleEl.addEventListener("pointerdown", onResizeDown);
+	rightResizeHandleEl.addEventListener("pointerdown", onResizeRightDown);
+	leftResizeHandleEl.addEventListener("pointerdown", onResizeLeftDown);
 	return () => {
 		barEl.removeEventListener("pointerdown", onBarDown);
-		resizeHandleEl.removeEventListener("pointerdown", onResizeDown);
+		rightResizeHandleEl.removeEventListener("pointerdown", onResizeRightDown);
+		leftResizeHandleEl.removeEventListener("pointerdown", onResizeLeftDown);
 	};
 }
 /**
@@ -2550,7 +2589,6 @@ function renderBar(layer, svgLayer, task, layout, selectedId, registry, state, c
 			id: task.id,
 			task: toTask(task)
 		});
-		else cbs.onTaskClick?.(task.id);
 	});
 	bar.addEventListener("keydown", (event) => {
 		if (event.key === "Enter" || event.key === " ") {
@@ -2558,12 +2596,25 @@ function renderBar(layer, svgLayer, task, layout, selectedId, registry, state, c
 			cbs.onTaskClick?.(task.id);
 		}
 	});
-	let handle;
+	let leftHandle;
+	let rightHandle;
 	let cleanupDrag;
 	if (!readonly) {
-		handle = el("div");
-		handle.className = "gantt-resize-handle";
-		css(handle, {
+		leftHandle = el("div");
+		leftHandle.className = "gantt-resize-handle gantt-resize-handle--start";
+		css(leftHandle, {
+			position: "absolute",
+			left: "0",
+			top: "0",
+			width: "8px",
+			height: "100%",
+			cursor: "ew-resize",
+			zIndex: "1",
+			touchAction: "none"
+		});
+		rightHandle = el("div");
+		rightHandle.className = "gantt-resize-handle gantt-resize-handle--end";
+		css(rightHandle, {
 			position: "absolute",
 			right: "0",
 			top: "0",
@@ -2573,9 +2624,9 @@ function renderBar(layer, svgLayer, task, layout, selectedId, registry, state, c
 			zIndex: "1",
 			touchAction: "none"
 		});
-		bar.append(handle);
+		bar.append(leftHandle, rightHandle);
 		layer.insertBefore(bar, svgLayer);
-		cleanupDrag = attachDrag(bar, handle, task, () => state.mapper, cbs);
+		cleanupDrag = attachDrag(bar, leftHandle, rightHandle, task, () => state.mapper, cbs);
 	} else layer.insertBefore(bar, svgLayer);
 	let cleanupLinkHandles;
 	if (state.linkCreationEnabled) {
@@ -2646,7 +2697,7 @@ function renderBar(layer, svgLayer, task, layout, selectedId, registry, state, c
 	};
 	const entry = {
 		bar,
-		resizeHandle: handle ?? el("div")
+		resizeHandle: rightHandle ?? el("div")
 	};
 	if (cleanupDrag !== void 0) entry.cleanupDrag = cleanupDrag;
 	if (cleanupLinkHandles !== void 0) entry.cleanupLinkHandles = cleanupLinkHandles;
@@ -3090,8 +3141,15 @@ var GanttChart = class {
 					const task = this.#input?.tasks.find((t) => t.id === payload.id);
 					if (task !== void 0) this.#dragOriginals.set(payload.id, task);
 				}
+				const original = this.#dragOriginals.get(payload.id);
 				const iso = payload.startDate.toISOString().slice(0, 10);
-				this.#patchTask(payload.id, { startDate: iso });
+				if (original !== void 0 && original.kind !== "milestone" && original.endDate) {
+					const origStart = parseDate(original.startDate);
+					const origEnd = parseDate(original.endDate);
+					const deltaDays = Math.round(diffDays(origStart, payload.startDate));
+					const newEnd = addDays(origEnd, deltaDays).toISOString().slice(0, 10);
+					this.#patchTask(payload.id, { startDate: iso, endDate: newEnd });
+				} else this.#patchTask(payload.id, { startDate: iso });
 				this.#scheduleRender();
 			},
 			_onTaskMoveFinal: async (payload) => {
@@ -3125,6 +3183,41 @@ var GanttChart = class {
 				}
 				this.#patchTask(payload.id, { endDate: payload.endDate });
 				this.#scheduleRender();
+			},
+			onTaskResizeStart: (payload) => {
+				if (!this.#dragOriginals.has(payload.id)) {
+					const task = this.#input?.tasks.find((t) => t.id === payload.id);
+					if (task !== void 0) this.#dragOriginals.set(payload.id, task);
+				}
+				this.#patchTask(payload.id, { startDate: payload.startDate });
+				this.#scheduleRender();
+			},
+			_onTaskResizeStartFinal: async (payload) => {
+				const task = this.#findTask(payload.id);
+				if (task !== void 0 && task.kind !== "milestone") {
+					const newStartDate = parseDate(task.startDate);
+					const newEndDate = parseDate(task.endDate);
+					const newDurationHours = diffHours(newEndDate, newStartDate);
+					const result = this.#callbacks.onTaskResize?.({
+						task,
+						newDurationHours,
+						newStartDate,
+						newEndDate,
+						instance: this
+					});
+					if (result instanceof Promise) {
+						if (!await result) {
+							const original = this.#dragOriginals.get(payload.id);
+							if (original !== void 0 && original.kind !== "milestone") this.#patchTask(payload.id, { startDate: original.startDate });
+						}
+					} else if (!result) {
+						const original = this.#dragOriginals.get(payload.id);
+						if (original !== void 0 && original.kind !== "milestone") this.#patchTask(payload.id, { startDate: original.startDate });
+					}
+				}
+				this.#dragOriginals.clear();
+				this.#scheduleRender();
+				return true;
 			},
 			_onTaskResizeFinal: async (payload) => {
 				const task = this.#findTask(payload.id);
@@ -3747,6 +3840,6 @@ var GanttChart = class {
 	}
 };
 //#endregion
-export { BAR_HEIGHT, BAR_Y_OFFSET, DEFAULT_GRID_COLUMNS, DENSITY, EN_US_LABELS, GRID_COLUMN_FR_MIN_WIDTH, GanttChart, GanttError, MILESTONE_HALF, MILESTONE_SIZE, ROW_HEIGHT, SCALE_CONFIGS, addDays, addHours, buildTaskTree, computeLayout, createPixelMapper, deriveViewport, deriveWeekNumbering, deriveWeekStartsOn, deriveWeekendDays, detectCycles, diffDays, diffHours, flattenTree, formatLabel, formatWeekNumber, gridColumnDefaults, gridNaturalWidth, gridTemplateColumns, isParent, parseDate, resolveChartLocale, routeLinks, validateLinkRefs, visibleColumns };
+export { BAR_HEIGHT, BAR_Y_OFFSET, DEFAULT_GRID_COLUMNS, DENSITY, EN_US_LABELS, GRID_COLUMN_FR_MIN_WIDTH, GanttChart, GanttError, MILESTONE_HALF, MILESTONE_SIZE, ROW_HEIGHT, SCALE_CONFIGS, addDays, addHours, buildTaskTree, computeLayout, createPixelMapper, deriveViewport, deriveWeekNumbering, deriveWeekStartsOn, deriveWeekendDays, detectCycles, diffDays, diffHours, flattenTree, formatLabel, formatWeekNumber, gridColumnDefaults, gridNaturalWidth, gridTemplateColumns, isParent, parseDate, resolveChartLocale, routeLinks, setColumnWidthMultiplier, validateLinkRefs, visibleColumns };
 
 //# sourceMappingURL=index.mjs.map

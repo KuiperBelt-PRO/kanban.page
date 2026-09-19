@@ -107,6 +107,13 @@ function backfillDemoSchedules(db, boardId) {
     { title: 'Refactor tablas admin en móvil', schedule_start_date: BoardCore.addDays(today, 20), schedule_end_date: BoardCore.addDays(today, 40) },
     { title: 'Formulario contacto: spam checks', schedule_start_date: BoardCore.addDays(today, 32), schedule_end_date: BoardCore.addDays(today, 52) },
     { title: 'Export CSV inscritos evento', schedule_start_date: null, schedule_end_date: BoardCore.addDays(today, 48) },
+    { title: 'Vista Gantt v2: dependencias Bezier', schedule_start_date: BoardCore.addDays(today, -12), schedule_end_date: BoardCore.addDays(today, 2) },
+    { title: 'Calendario Kuiper: chips y drag', schedule_start_date: BoardCore.addDays(today, -8), schedule_end_date: BoardCore.addDays(today, 8) },
+    { title: 'Sync relay modo clásico', schedule_start_date: BoardCore.addDays(today, 4), schedule_end_date: BoardCore.addDays(today, 18) },
+    { title: 'PDA: modo oscuro admin', schedule_start_date: BoardCore.addDays(today, 12), schedule_end_date: BoardCore.addDays(today, 28) },
+    { title: 'Open Medical: wireframes onboarding', schedule_start_date: null, schedule_end_date: null },
+    { title: 'KBWB: chatbot PHP simple', schedule_start_date: BoardCore.addDays(today, 24), schedule_end_date: BoardCore.addDays(today, 44) },
+    { title: 'AUTO: batch sync DreamHost', schedule_start_date: BoardCore.addDays(today, -4), schedule_end_date: BoardCore.addDays(today, 12) },
   ];
   let updated = 0;
   for (const spec of specs) {
@@ -264,6 +271,12 @@ function cmdSeed(args, opts) {
     const epicPdaPolls = ensureEpic(db, pda.id, 'Encuestas', 'Flujo socio y admin');
     const epicWebLanding = ensureEpic(db, kuiperWeb.id, 'Landing refresh', 'Media e IA generativa');
     const epicAutoPdf = ensureEpic(db, automations.id, 'MD → PDF', 'Pipeline documentos Kuiper');
+    const epicVibeGantt = ensureEpic(db, vibe.id, 'Vista Gantt', 'Planificación visual cross-proyecto');
+    const epicVibeCalendar = ensureEpic(db, vibe.id, 'Vista Calendario', 'Chips y arrastre de fechas');
+    const epicPdaDark = ensureEpic(db, pda.id, 'Dark mode', 'Tema oscuro app y admin');
+    const epicMedUx = ensureEpic(db, openMed.id, 'UX onboarding', 'Primer acceso y perfiles');
+    const epicWebChat = ensureEpic(db, kuiperWeb.id, 'Chatbot landing', 'Asistente PHP en kuiperbelt.pro');
+    const epicAutoOps = ensureEpic(db, automations.id, 'Ops deploy', 'Scripts SFTP y sync');
 
     const demoCards = [
       {
@@ -371,6 +384,56 @@ function cmdSeed(args, opts) {
         priority: 2,
         flagged: true,
       },
+      {
+        project_id: vibe.id,
+        title: 'Vista Gantt v2: dependencias Bezier',
+        stage: 'DOING',
+        epic_id: epicVibeGantt.id,
+        priority: 4,
+        flagged: true,
+      },
+      {
+        project_id: vibe.id,
+        title: 'Calendario Kuiper: chips y drag',
+        stage: 'DOING',
+        epic_id: epicVibeCalendar.id,
+        priority: 3,
+      },
+      {
+        project_id: vibe.id,
+        title: 'Sync relay modo clásico',
+        stage: 'WAITING',
+        epic_id: epicKanban.id,
+        priority: 1,
+      },
+      {
+        project_id: pda.id,
+        title: 'PDA: modo oscuro admin',
+        stage: 'INBOX',
+        epic_id: epicPdaDark.id,
+        priority: 2,
+      },
+      {
+        project_id: openMed.id,
+        title: 'Open Medical: wireframes onboarding',
+        stage: 'INBOX',
+        epic_id: epicMedUx.id,
+        priority: 1,
+      },
+      {
+        project_id: kuiperWeb.id,
+        title: 'KBWB: chatbot PHP simple',
+        stage: 'WAITING',
+        epic_id: epicWebChat.id,
+        priority: 2,
+      },
+      {
+        project_id: automations.id,
+        title: 'AUTO: batch sync DreamHost',
+        stage: 'DOING',
+        epic_id: epicAutoOps.id,
+        priority: 3,
+      },
     ];
 
     const today = BoardCore.ymd();
@@ -389,6 +452,13 @@ function cmdSeed(args, opts) {
         'Refactor tablas admin en móvil': { schedule_start_date: BoardCore.addDays(today, 20), schedule_end_date: BoardCore.addDays(today, 40) },
         'Formulario contacto: spam checks': { schedule_start_date: BoardCore.addDays(today, 32), schedule_end_date: BoardCore.addDays(today, 52) },
         'Export CSV inscritos evento': { schedule_start_date: null, schedule_end_date: BoardCore.addDays(today, 48) },
+        'Vista Gantt v2: dependencias Bezier': { schedule_start_date: BoardCore.addDays(today, -12), schedule_end_date: BoardCore.addDays(today, 2) },
+        'Calendario Kuiper: chips y drag': { schedule_start_date: BoardCore.addDays(today, -8), schedule_end_date: BoardCore.addDays(today, 8) },
+        'Sync relay modo clásico': { schedule_start_date: BoardCore.addDays(today, 4), schedule_end_date: BoardCore.addDays(today, 18) },
+        'PDA: modo oscuro admin': { schedule_start_date: BoardCore.addDays(today, 12), schedule_end_date: BoardCore.addDays(today, 28) },
+        'Open Medical: wireframes onboarding': { schedule_start_date: null, schedule_end_date: null },
+        'KBWB: chatbot PHP simple': { schedule_start_date: BoardCore.addDays(today, 24), schedule_end_date: BoardCore.addDays(today, 44) },
+        'AUTO: batch sync DreamHost': { schedule_start_date: BoardCore.addDays(today, -4), schedule_end_date: BoardCore.addDays(today, 12) },
       };
       return map[title] || {};
     };
@@ -423,6 +493,16 @@ function cmdSeed(args, opts) {
     ensureBlocksLink(db, board.id, 'Integrar vídeos landing', 'Formulario contacto: spam checks');
     ensureBlocksLink(db, board.id, 'Refactor tablas admin en móvil', 'Export CSV inscritos evento');
     ensureBlocksLink(db, board.id, 'Formulario contacto: spam checks', 'Actualizar skill kuiper-kanban');
+    ensureBlocksLink(db, board.id, 'Revisar tests API navigation', 'Vista Gantt v2: dependencias Bezier');
+    ensureBlocksLink(db, board.id, 'Vista Gantt v2: dependencias Bezier', 'Calendario Kuiper: chips y drag');
+    ensureBlocksLink(db, board.id, 'Calendario Kuiper: chips y drag', 'Sync relay modo clásico');
+    ensureBlocksLink(db, board.id, 'Documentar deploy interno', 'AUTO: batch sync DreamHost');
+    ensureBlocksLink(db, board.id, 'AUTO: batch sync DreamHost', 'PDA: modo oscuro admin');
+    ensureBlocksLink(db, board.id, 'Definir stack inicial open-medical', 'Open Medical: wireframes onboarding');
+    ensureBlocksLink(db, board.id, 'Open Medical: wireframes onboarding', 'KBWB: chatbot PHP simple');
+    ensureBlocksLink(db, board.id, 'Integrar vídeos landing', 'KBWB: chatbot PHP simple');
+    ensureBlocksLink(db, board.id, 'Actualizar skill kuiper-kanban', 'Sync relay modo clásico');
+    ensureBlocksLink(db, board.id, 'Optimizar raster Mermaid en PDF', 'AUTO: batch sync DreamHost');
 
     const snapshot = boards.getSnapshot(db, board.slug);
     if (opts.json) {

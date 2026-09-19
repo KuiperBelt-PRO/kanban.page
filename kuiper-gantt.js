@@ -183,24 +183,26 @@ const KuiperGantt = (() => {
   }
 
   /** Ventana inicial: prefs guardados, centro ± ventana, o tareas visibles ± padding. */
-  function defaultViewportForTasks(tasks) {
+  function defaultViewportForTasks(tasks, { compact = false } = {}) {
     const p = prefs();
-    if (p.ganttViewportStart && p.ganttViewportEnd && p.ganttViewportStart < p.ganttViewportEnd) {
+    if (!compact && p.ganttViewportStart && p.ganttViewportEnd && p.ganttViewportStart < p.ganttViewportEnd) {
       return [
         clampViewportYmd(p.ganttViewportStart),
         clampViewportYmd(p.ganttViewportEnd),
       ];
     }
     let [startYmd, endYmd] = timelineWindowFromCenter(windowCenter());
-    for (const t of tasks) {
-      if (t.kind === 'project') continue;
-      const s = t.startDate;
-      const e = t.endDate || t.startDate;
-      if (!s && !e) continue;
-      const a = s || e;
-      const b = e || s;
-      if (a < startYmd) startYmd = BoardCore.addDays(a, -7);
-      if (b > endYmd) endYmd = BoardCore.addDays(b, 7);
+    if (!compact) {
+      for (const t of tasks) {
+        if (t.kind === 'project') continue;
+        const s = t.startDate;
+        const e = t.endDate || t.startDate;
+        if (!s && !e) continue;
+        const a = s || e;
+        const b = e || s;
+        if (a < startYmd) startYmd = BoardCore.addDays(a, -7);
+        if (b > endYmd) endYmd = BoardCore.addDays(b, 7);
+      }
     }
     startYmd = clampViewportYmd(startYmd);
     endYmd = clampViewportYmd(endYmd);
@@ -212,7 +214,7 @@ const KuiperGantt = (() => {
     if (!reset && chartOpts.viewportStart && chartOpts.viewportEnd) {
       return [chartOpts.viewportStart, chartOpts.viewportEnd];
     }
-    return defaultViewportForTasks(tasks);
+    return defaultViewportForTasks(tasks, { compact: reset });
   }
 
   function persistViewportPrefs(startYmd, endYmd) {
@@ -329,14 +331,21 @@ const KuiperGantt = (() => {
   }
 
   function resetViewportToDefault(smooth = false) {
+    viewportShiftLock = true;
     chartOpts.viewportStart = null;
     chartOpts.viewportEnd = null;
     persistViewportPrefs(null, null);
-    refreshChartDataLight({ resetViewport: true, autoScroll: !smooth });
+    const root = shellEl?.querySelector('.gantt-root');
+    const scrollEl = root?.children[0];
+    if (scrollEl) scrollEl.scrollLeft = 0;
+    refreshChartDataLight({ resetViewport: true, autoScroll: true });
+    viewportShiftLock = false;
     if (smooth) {
       requestAnimationFrame(() => {
-        const root = shellEl?.querySelector('.gantt-root');
-        if (root) scrollToToday(root, true);
+        requestAnimationFrame(() => {
+          const r = shellEl?.querySelector('.gantt-root');
+          if (r) scrollToToday(r, true);
+        });
       });
     }
   }
@@ -469,7 +478,9 @@ const KuiperGantt = (() => {
     if (!root) return;
     afterChartUpdate(root, renderToken);
     const sc = root.children[0];
-    if (scroll && sc) {
+    if (resetViewport) {
+      scrollToToday(root, false);
+    } else if (scroll && sc) {
       sc.scrollLeft = scroll.left;
       sc.scrollTop = scroll.top;
     } else if (autoScroll) {

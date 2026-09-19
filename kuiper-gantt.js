@@ -12,6 +12,9 @@ const KuiperGantt = (() => {
   const VIEWPORT_PAD_DAYS = 365;
   const WINDOW_DAYS = { day: 35, week: 91, month: 210 };
   const PAN_DAYS = { day: 7, week: 28, month: 60 };
+  const EXPAND_CHUNK_DAYS = { day: 21, week: 42, month: 56 };
+  const MAX_VIEWPORT_DAYS = { day: 105, week: 210, month: 365 };
+  const SCROLL_EDGE_PX = 96;
   const COL_ZOOM_LEVELS = [0.6, 0.75, 0.9, 1, 1.2, 1.5, 2];
   const TIMELINE_HEADER_H = 52;
   let selectedCardId = null;
@@ -28,6 +31,8 @@ const KuiperGantt = (() => {
   let persistSeq = 0;
   let bezierObservedEl = null;
   let leftPaneObservedEl = null;
+  let viewportShiftLock = false;
+  let viewportScrollRaf = 0;
 
   const SCALES = { day: 'day', week: 'week', month: 'month' };
 
@@ -150,8 +155,42 @@ const KuiperGantt = (() => {
     ];
   }
 
-  /** Ventana visible acotada (no 2 años de ancho); se desplaza con prev/next. */
-  function timelineViewport(tasks) {
+  function viewportYmdBounds() {
+    const today = BoardCore.ymd();
+    return [
+      BoardCore.addDays(today, -VIEWPORT_PAD_DAYS),
+      BoardCore.addDays(today, VIEWPORT_PAD_DAYS),
+    ];
+  }
+
+  function clampViewportYmd(ymd) {
+    const [min, max] = viewportYmdBounds();
+    if (ymd < min) return min;
+    if (ymd > max) return max;
+    return ymd;
+  }
+
+  function viewportSpanDays(startYmd, endYmd) {
+    return Math.max(0, BoardCore.scheduleDayDelta(startYmd, endYmd));
+  }
+
+  function expandChunkDays() {
+    return EXPAND_CHUNK_DAYS[zoom()] || EXPAND_CHUNK_DAYS.week;
+  }
+
+  function maxViewportDays() {
+    return MAX_VIEWPORT_DAYS[zoom()] || MAX_VIEWPORT_DAYS.week;
+  }
+
+  /** Ventana inicial: prefs guardados, centro ± ventana, o tareas visibles ± padding. */
+  function defaultViewportForTasks(tasks) {
+    const p = prefs();
+    if (p.ganttViewportStart && p.ganttViewportEnd && p.ganttViewportStart < p.ganttViewportEnd) {
+      return [
+        clampViewportYmd(p.ganttViewportStart),
+        clampViewportYmd(p.ganttViewportEnd),
+      ];
+    }
     let [startYmd, endYmd] = timelineWindowFromCenter(windowCenter());
     for (const t of tasks) {
       if (t.kind === 'project') continue;
@@ -163,37 +202,179 @@ const KuiperGantt = (() => {
       if (a < startYmd) startYmd = BoardCore.addDays(a, -7);
       if (b > endYmd) endYmd = BoardCore.addDays(b, 7);
     }
+    startYmd = clampViewportYmd(startYmd);
+    endYmd = clampViewportYmd(endYmd);
+    if (startYmd >= endYmd) endYmd = BoardCore.addDays(startYmd, 7);
     return [startYmd, endYmd];
   }
 
-  function refreshTimelineWindow(smooth = false) {
-    if (!chart || !shellEl) return;
-    const [start, end] = timelineWindowFromCenter(windowCenter());
-    chartOpts.viewportStart = start;
-    chartOpts.viewportEnd = end;
-    chart.setOptions({
-      viewportStart: new Date(`${start}T00:00:00Z`),
-      viewportEnd: new Date(`${end}T00:00:00Z`),
+  function resolveViewport(tasks, { reset = false } = {}) {
+    if (!reset && chartOpts.viewportStart && chartOpts.viewportEnd) {
+      return [chartOpts.viewportStart, chartOpts.viewportEnd];
+    }
+    return defaultViewportForTasks(tasks);
+  }
+
+  function persistViewportPrefs(startYmd, endYmd) {
+    if (startYmd && endYmd && startYmd < endYmd) {
+      savePrefs({ ganttViewportStart: startYmd, ganttViewportEnd: endYmd });
+    } else {
+      savePrefs({ ganttViewportStart: null, ganttViewportEnd: null });
+    }
+  }
+
+  function setViewportRange(startYmd, endYmd, scroll) {
+    chartOpts.viewportStart = startYmd;
+    chartOpts.viewportEnd = endYmd;
+    persistViewportPrefs(startYmd, endYmd);
+    refreshChartDataLight({ scroll });
+  }
+
+  function trimViewportIfNeeded(expandSide) {
+    const startYmd = chartOpts.viewportStart;
+    const endYmd = chartOpts.viewportEnd;
+    if (!startYmd || !endYmd || !ganttLib) return;
+    const span = viewportSpanDays(startYmd, endYmd);
+    const maxDays = maxViewportDays();
+    if (span <= maxDays) return;
+    const trimDays = Math.min(span - maxDays, expandChunkDays());
+    if (trimDays <= 0) return;
+    const root = shellEl?.querySelector('.gantt-root');
+    const scrollEl = root?.children[0];
+    if (!scrollEl) return;
+    const scrollTop = scrollEl.scrollTop;
+    const { createPixelMapper } = ganttLib;
+    if (expandSide === 'right') {
+      const newStart = BoardCore.addDays(startYmd, trimDays);
+      if (newStart >= endYmd) return;
+      const oldMapper = createPixelMapper(
+        chartOpts.scale,
+        new Date(`${startYmd}T00:00:00Z`),
+      );
+      const removedPx = oldMapper.toX(new Date(`${newStart}T00:00:00Z`));
+      setViewportRange(newStart, endYmd, {
+        left: Math.max(0, scrollEl.scrollLeft - removedPx),
+        top: scrollTop,
+      });
+      return;
+    }
+    const newEnd = BoardCore.addDays(endYmd, -trimDays);
+    if (newEnd <= startYmd) return;
+    setViewportRange(startYmd, newEnd, {
+      left: scrollEl.scrollLeft,
+      top: scrollTop,
     });
+  }
+
+  function expandViewportLeft(chunkDays) {
+    if (!ganttLib || !shellEl || viewportShiftLock) return false;
+    const startYmd = chartOpts.viewportStart;
+    const endYmd = chartOpts.viewportEnd;
+    if (!startYmd || !endYmd) return false;
+    const newStart = clampViewportYmd(BoardCore.addDays(startYmd, -chunkDays));
+    if (newStart === startYmd) return false;
     const root = shellEl.querySelector('.gantt-root');
-    if (!root) return;
-    requestAnimationFrame(() => {
-      stretchTimelineHeight(root);
-      scrollToToday(root, smooth);
-      scheduleBezierSync(root);
+    const scrollEl = root?.children[0];
+    if (!scrollEl) return false;
+    const { createPixelMapper } = ganttLib;
+    const newMapper = createPixelMapper(chartOpts.scale, new Date(`${newStart}T00:00:00Z`));
+    const deltaPx = newMapper.toX(new Date(`${startYmd}T00:00:00Z`));
+    viewportShiftLock = true;
+    setViewportRange(newStart, endYmd, {
+      left: scrollEl.scrollLeft + deltaPx,
+      top: scrollEl.scrollTop,
     });
+    trimViewportIfNeeded('left');
+    viewportShiftLock = false;
+    return true;
+  }
+
+  function expandViewportRight(chunkDays) {
+    if (!ganttLib || !shellEl || viewportShiftLock) return false;
+    const startYmd = chartOpts.viewportStart;
+    const endYmd = chartOpts.viewportEnd;
+    if (!startYmd || !endYmd) return false;
+    const newEnd = clampViewportYmd(BoardCore.addDays(endYmd, chunkDays));
+    if (newEnd === endYmd) return false;
+    const root = shellEl.querySelector('.gantt-root');
+    const scrollEl = root?.children[0];
+    viewportShiftLock = true;
+    setViewportRange(startYmd, newEnd, scrollEl
+      ? { left: scrollEl.scrollLeft, top: scrollEl.scrollTop }
+      : null);
+    trimViewportIfNeeded('right');
+    viewportShiftLock = false;
+    return true;
+  }
+
+  function checkViewportOnScroll(root) {
+    if (viewportShiftLock || !chart || !ganttLib || !root) return;
+    const scrollEl = root.children[0];
+    if (!scrollEl) return;
+    const maxScroll = Math.max(0, scrollEl.scrollWidth - scrollEl.clientWidth);
+    const scrollLeft = scrollEl.scrollLeft;
+    const chunk = expandChunkDays();
+    if (scrollLeft <= SCROLL_EDGE_PX) {
+      expandViewportLeft(chunk);
+    } else if (maxScroll > 0 && maxScroll - scrollLeft <= SCROLL_EDGE_PX) {
+      expandViewportRight(chunk);
+    }
+  }
+
+  function scheduleViewportShiftCheck(root) {
+    cancelAnimationFrame(viewportScrollRaf);
+    viewportScrollRaf = requestAnimationFrame(() => {
+      checkViewportOnScroll(root);
+    });
+  }
+
+  function resetViewportToDefault(smooth = false) {
+    chartOpts.viewportStart = null;
+    chartOpts.viewportEnd = null;
+    persistViewportPrefs(null, null);
+    refreshChartDataLight({ resetViewport: true, autoScroll: !smooth });
+    if (smooth) {
+      requestAnimationFrame(() => {
+        const root = shellEl?.querySelector('.gantt-root');
+        if (root) scrollToToday(root, true);
+      });
+    }
+  }
+
+  function refreshTimelineWindow(smooth = false) {
+    resetViewportToDefault(smooth);
   }
 
   function panTimeline(direction) {
     const pan = PAN_DAYS[zoom()] || PAN_DAYS.week;
-    const next = clampWindowCenter(BoardCore.addDays(windowCenter(), direction * pan));
-    savePrefs({ ganttWindowCenter: next });
-    refreshTimelineWindow();
+    const delta = direction * pan;
+    const startYmd = chartOpts.viewportStart;
+    const endYmd = chartOpts.viewportEnd;
+    const nextCenter = clampWindowCenter(BoardCore.addDays(windowCenter(), delta));
+    savePrefs({ ganttWindowCenter: nextCenter });
+    if (!startYmd || !endYmd) {
+      resetViewportToDefault(false);
+      return;
+    }
+    let newStart = clampViewportYmd(BoardCore.addDays(startYmd, delta));
+    const actualDelta = BoardCore.scheduleDayDelta(startYmd, newStart);
+    const newEnd = clampViewportYmd(BoardCore.addDays(endYmd, actualDelta));
+    const root = shellEl?.querySelector('.gantt-root');
+    const scrollEl = root?.children[0];
+    const scroll = scrollEl
+      ? { left: scrollEl.scrollLeft, top: scrollEl.scrollTop }
+      : null;
+    if (actualDelta && ganttLib && scroll) {
+      const { createPixelMapper } = ganttLib;
+      const mapper = createPixelMapper(chartOpts.scale, new Date(`${startYmd}T00:00:00Z`));
+      scroll.left = Math.max(0, scroll.left + mapper.durationDaysToWidth(actualDelta));
+    }
+    setViewportRange(newStart, newEnd, scroll);
   }
 
   function goToToday() {
     savePrefs({ ganttWindowCenter: BoardCore.ymd() });
-    refreshTimelineWindow(true);
+    resetViewportToDefault(true);
   }
 
   function cardTask(cardId) {
@@ -266,16 +447,17 @@ const KuiperGantt = (() => {
     if (zin) zin.disabled = colZoomIndex() >= COL_ZOOM_LEVELS.length - 1;
   }
 
-  function refreshChartDataLight({ scroll = null, autoScroll = false } = {}) {
+  function refreshChartDataLight({ scroll = null, autoScroll = false, resetViewport = false } = {}) {
     if (!chart || !shellEl) return;
     if (ganttLib) ganttLib.setColumnWidthMultiplier(colZoomMultiplier());
     const { tasks, links } = buildTreeInput();
-    const [vpStartYmd, vpEndYmd] = timelineViewport(tasks);
+    const [vpStartYmd, vpEndYmd] = resolveViewport(tasks, { reset: resetViewport });
     chartOpts = {
       scale: SCALES[zoom()] || 'week',
       viewportStart: vpStartYmd,
       viewportEnd: vpEndYmd,
     };
+    persistViewportPrefs(vpStartYmd, vpEndYmd);
     chart.setOptions({
       scale: chartOpts.scale,
       viewportStart: new Date(`${vpStartYmd}T00:00:00Z`),
@@ -681,6 +863,8 @@ const KuiperGantt = (() => {
       e.preventDefault();
       const delta = e.shiftKey ? (e.deltaY + e.deltaX) : e.deltaX;
       scrollEl.scrollLeft += delta;
+      const root = scrollEl.closest('.gantt-root');
+      if (root) scheduleViewportShiftCheck(root);
     }, { passive: false });
   }
 
@@ -1071,6 +1255,7 @@ const KuiperGantt = (() => {
       scrollEl.onscroll = () => {
         if (token !== renderToken) return;
         scheduleBezierSync(root);
+        scheduleViewportShiftCheck(root);
       };
     }
   }
@@ -1125,7 +1310,7 @@ const KuiperGantt = (() => {
     await new Promise(r => requestAnimationFrame(r));
 
     const { tasks, links } = buildTreeInput();
-    const [vpStartYmd, vpEndYmd] = timelineViewport(tasks);
+    const [vpStartYmd, vpEndYmd] = resolveViewport(tasks);
     chartOpts = {
       scale: SCALES[zoom()] || 'week',
       viewportStart: vpStartYmd,
@@ -1270,7 +1455,10 @@ const KuiperGantt = (() => {
 
   function destroy() {
     cancelAnimationFrame(bezierRaf);
+    cancelAnimationFrame(viewportScrollRaf);
     bezierRaf = 0;
+    viewportScrollRaf = 0;
+    viewportShiftLock = false;
     if (bezierObserver) {
       bezierObserver.disconnect();
       bezierObserver = null;

@@ -157,10 +157,13 @@ Mismas opciones que tablero (`position`, `priority`, `updatedAt`) más **`schedu
 
 | Regla | Detalle |
 | --- | --- |
-| Cálculo inicial | `min(start)` y `max(end)` de issues visibles ± padding 7 días |
-| Sin issues programadas | Semana actual ± 2 semanas |
-| Navegación | Botones ← →, botón «Hoy», scroll horizontal |
-| Persistencia rango | `ganttAnchorDate` en prefs (día central o inicio visible) |
+| Cálculo inicial | Centro `ganttWindowCenter` ± ventana por zoom, ampliado con `min(start)` / `max(end)` de issues visibles ± 7 días |
+| Sin issues programadas | Ventana centrada en `ganttWindowCenter` (por defecto hoy) |
+| Límite absoluto | ±365 días desde hoy (`VIEWPORT_PAD_DAYS`) |
+| Ventana deslizante | Al acercarse al borde del scroll (≤96 px), se amplía el rango en un chunk según zoom; si supera el máximo visible se recorta el lado opuesto |
+| Chunks / máximo | Día 21/105, semana 42/210, mes 56/365 días |
+| Navegación | Botones ← → desplazan la ventana completa; «Hoy» resetea a ventana compacta y centra en hoy |
+| Persistencia | `ganttWindowCenter`, `ganttViewportStart`, `ganttViewportEnd` en prefs UI |
 
 ---
 

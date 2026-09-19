@@ -815,26 +815,50 @@ const KuiperGantt = (() => {
     }
   }
 
-  function scrollToToday(root, smooth = false) {
-    const scrollEl = root?.children[0];
-    if (!scrollEl || !ganttLib || !chartOpts.viewportStart) return;
-    const focusYmd = windowCenter();
+  function visibleTimelineWidth(root, scrollEl) {
+    const leftPane = root?.querySelector?.('[data-pane="left"]');
+    const leftW = leftPane?.offsetWidth || 0;
+    return Math.max(120, (scrollEl?.clientWidth || 0) - leftW);
+  }
+
+  function timelineFocusRatio() {
+    return 0.38;
+  }
+
+  function pixelMapperForViewport() {
+    if (!ganttLib || !chartOpts.viewportStart) return null;
     const { createPixelMapper } = ganttLib;
-    const mapper = createPixelMapper(
+    return createPixelMapper(
       chartOpts.scale,
       new Date(`${chartOpts.viewportStart}T00:00:00Z`),
     );
+  }
+
+  function ymdAtTimelineFocus(root) {
+    const scrollEl = root?.children[0];
+    const mapper = pixelMapperForViewport();
+    if (!scrollEl || !mapper) return windowCenter();
+    const focusX = scrollEl.scrollLeft + visibleTimelineWidth(root, scrollEl) * timelineFocusRatio();
+    return dateToYmd(mapper.toDate(focusX));
+  }
+
+  function scrollToYmd(root, focusYmd, smooth = false) {
+    const scrollEl = root?.children[0];
+    const mapper = pixelMapperForViewport();
+    if (!scrollEl || !mapper || !focusYmd) return;
     const focusX = mapper.toX(new Date(`${focusYmd}T12:00:00Z`));
-    const leftPane = root.querySelector('[data-pane="left"]');
-    const leftW = leftPane?.offsetWidth || 0;
-    const visibleRight = Math.max(120, scrollEl.clientWidth - leftW);
-    const target = Math.max(0, focusX - Math.round(visibleRight * 0.38));
+    const visibleRight = visibleTimelineWidth(root, scrollEl);
+    const target = Math.max(0, focusX - Math.round(visibleRight * timelineFocusRatio()));
     const behavior = smooth ? 'smooth' : 'auto';
     if (typeof scrollEl.scrollTo === 'function') {
       scrollEl.scrollTo({ left: target, behavior });
     } else {
       scrollEl.scrollLeft = target;
     }
+  }
+
+  function scrollToToday(root, smooth = false) {
+    scrollToYmd(root, windowCenter(), smooth);
   }
 
   function stretchTimelineHeight(root) {
@@ -1170,7 +1194,22 @@ const KuiperGantt = (() => {
   function changeColZoom(delta) {
     const next = Math.max(0, Math.min(COL_ZOOM_LEVELS.length - 1, colZoomIndex() + delta));
     if (next === colZoomIndex()) return;
+    const root = shellEl?.querySelector('.gantt-root');
+    const anchorYmd = root ? ymdAtTimelineFocus(root) : windowCenter();
     savePrefs({ ganttColZoomIdx: next });
+    if (chart && shellEl) {
+      viewportShiftLock = true;
+      syncToolbar();
+      refreshChartDataLight({ scroll: null, autoScroll: false });
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          const r = shellEl?.querySelector('.gantt-root');
+          if (r) scrollToYmd(r, anchorYmd, false);
+          viewportShiftLock = false;
+        });
+      });
+      return;
+    }
     if (hostEl) render(hostEl);
     else ctx.renderBoard?.();
   }

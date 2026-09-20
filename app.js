@@ -1490,6 +1490,8 @@ function renderBoard() {
   }
   board.innerHTML = '';
   const swimlanes = KUIPER && typeof KuiperUI !== 'undefined' && KuiperUI.isSwimlaneMode?.();
+  // Quitar clases de otras vistas (gantt/calendar ponen overflow:hidden en .board).
+  board.className = 'board';
   board.classList.toggle('kuiper-swimlanes', !!swimlanes);
   if (swimlanes) board.style.setProperty('--stage-count', String(state.columns.length));
   else board.style.removeProperty('--stage-count');

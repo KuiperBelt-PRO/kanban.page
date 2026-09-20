@@ -68,7 +68,7 @@ const KuiperGantt = (() => {
   }
 
   function rowHeightPx() {
-    return ganttLib?.ROW_HEIGHT || 32;
+    return ganttLib?.ROW_HEIGHT || rowDensityForMode().rowHeight;
   }
 
   function cardIdFromRowNum(num) {
@@ -94,9 +94,42 @@ const KuiperGantt = (() => {
     }
   }
 
+  const GANTT_RENDERER_VER = '20250920-row28';
+  const ROW_DENSITY_BY_MODE = {
+    comfortable: { rowHeight: 28, barHeight: 18, milestoneSize: 10 },
+    compact: { rowHeight: 24, barHeight: 14, milestoneSize: 8 },
+  };
+  let appliedRowDensityKey = null;
+
+  function ganttDensityMode() {
+    return document.documentElement.dataset.density === 'compact' ? 'compact' : 'comfortable';
+  }
+
+  function rowDensityForMode(mode = ganttDensityMode()) {
+    return ROW_DENSITY_BY_MODE[mode] || ROW_DENSITY_BY_MODE.comfortable;
+  }
+
+  /** Aplica densidad de filas al renderer y a tokens CSS del chart. Devuelve true si cambió. */
+  function applyGanttRowDensity(root) {
+    const mode = ganttDensityMode();
+    const density = rowDensityForMode(mode);
+    const key = `${mode}:${density.rowHeight}`;
+    const changed = appliedRowDensityKey !== key;
+    appliedRowDensityKey = key;
+    ganttLib?.setRowDensity?.(density);
+    if (root) {
+      root.style.setProperty('--gantt-row-height', `${density.rowHeight}px`);
+      root.style.setProperty('--gantt-bar-height', `${density.barHeight}px`);
+      root.style.setProperty('--gantt-milestone-size', `${density.milestoneSize}px`);
+      root.dataset.ganttRowHeight = String(density.rowHeight);
+    }
+    return changed;
+  }
+
   async function loadLib() {
     if (!ganttLib) {
-      ganttLib = await import('./vendor/gantt-renderer/index.mjs');
+      ganttLib = await import(`./vendor/gantt-renderer/index.mjs?v=${GANTT_RENDERER_VER}`);
+      applyGanttRowDensity();
       if (locale().startsWith('es')) {
         esLocale = (await import('./vendor/gantt-renderer/locales/es.mjs')).CHART_LOCALE;
       }
@@ -144,8 +177,7 @@ const KuiperGantt = (() => {
     return ymd;
   }
 
-  function timelineWindowFromCenter(centerYmd) {
-    const scale = zoom();
+  function timelineWindowFromCenter(centerYmd, scale = zoom()) {
     const windowDays = WINDOW_DAYS[scale] || WINDOW_DAYS.week;
     const center = clampWindowCenter(centerYmd);
     const half = Math.floor(windowDays / 2);
@@ -153,6 +185,15 @@ const KuiperGantt = (() => {
       BoardCore.addDays(center, -half),
       BoardCore.addDays(center, windowDays - half),
     ];
+  }
+
+  /** Ventana compacta del zoom actual centrada en un día (p. ej. al cambiar day/week/month). */
+  function setCompactViewportAround(centerYmd, scale = zoom()) {
+    const [startYmd, endYmd] = timelineWindowFromCenter(centerYmd, scale);
+    chartOpts.viewportStart = startYmd;
+    chartOpts.viewportEnd = endYmd;
+    persistViewportPrefs(startYmd, endYmd);
+    return [startYmd, endYmd];
   }
 
   function viewportYmdBounds() {
@@ -458,6 +499,8 @@ const KuiperGantt = (() => {
 
   function refreshChartDataLight({ scroll = null, autoScroll = false, resetViewport = false } = {}) {
     if (!chart || !shellEl) return;
+    const root = shellEl.querySelector('.gantt-root');
+    applyGanttRowDensity(root);
     if (ganttLib) ganttLib.setColumnWidthMultiplier(colZoomMultiplier());
     const { tasks, links } = buildTreeInput();
     const [vpStartYmd, vpEndYmd] = resolveViewport(tasks, { reset: resetViewport });
@@ -474,7 +517,6 @@ const KuiperGantt = (() => {
     });
     injectGanttStyles(tasks);
     chart.update({ tasks, links });
-    const root = shellEl.querySelector('.gantt-root');
     if (!root) return;
     afterChartUpdate(root, renderToken);
     const sc = root.children[0];
@@ -864,16 +906,32 @@ const KuiperGantt = (() => {
   function stretchTimelineHeight(root) {
     const scrollEl = root?.children[0];
     if (!scrollEl || scrollEl.clientHeight <= 0) return;
-    const minBody = Math.max(0, scrollEl.clientHeight - 52);
-    const left = root.querySelector('[data-pane="left"]');
+    const minBody = Math.max(0, scrollEl.clientHeight - TIMELINE_HEADER_H);
     const leftBody = leftPaneBody(root);
     const sc = getRightScrollContainer(root);
     const stripe = sc?.children[0];
     const abs = getAbsoluteLayer(root);
-    if (leftBody) leftBody.style.minHeight = `${minBody}px`;
-    if (stripe) stripe.style.minHeight = `${minBody}px`;
+    if (leftBody) leftBody.style.minHeight = '';
+    if (stripe) {
+      stripe.style.minHeight = '';
+      stripe.querySelector('.kuiper-gantt-stripe-fill')?.remove();
+      const rowH = rowHeightPx();
+      const stripeRows = stripe.querySelectorAll('.gantt-stripe-row');
+      const contentH = stripeRows.length * rowH;
+      const pad = Math.max(0, minBody - contentH);
+      if (pad > 0) {
+        const fill = document.createElement('div');
+        fill.className = 'kuiper-gantt-stripe-fill';
+        fill.style.height = `${pad}px`;
+        fill.style.background = 'var(--gantt-bg)';
+        fill.style.pointerEvents = 'none';
+        stripe.append(fill);
+      }
+    }
     if (abs) {
-      const contentH = parseFloat(abs.style.height) || 0;
+      const rowH = rowHeightPx();
+      const stripeRows = stripe?.querySelectorAll('.gantt-stripe-row') || [];
+      const contentH = stripeRows.length * rowH;
       const h = Math.max(contentH, minBody);
       abs.style.height = `${h}px`;
       const overlay = sc?.querySelector('.kuiper-bezier-overlay');
@@ -1191,25 +1249,40 @@ const KuiperGantt = (() => {
     });
   }
 
+  function restoreTimelineAnchor(anchorYmd) {
+    if (!chart || !shellEl) return false;
+    viewportShiftLock = true;
+    syncToolbar();
+    refreshChartDataLight({ scroll: null, autoScroll: false });
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const r = shellEl?.querySelector('.gantt-root');
+        if (r) scrollToYmd(r, anchorYmd, false);
+        viewportShiftLock = false;
+      });
+    });
+    return true;
+  }
+
   function changeColZoom(delta) {
     const next = Math.max(0, Math.min(COL_ZOOM_LEVELS.length - 1, colZoomIndex() + delta));
     if (next === colZoomIndex()) return;
     const root = shellEl?.querySelector('.gantt-root');
     const anchorYmd = root ? ymdAtTimelineFocus(root) : windowCenter();
     savePrefs({ ganttColZoomIdx: next });
-    if (chart && shellEl) {
-      viewportShiftLock = true;
-      syncToolbar();
-      refreshChartDataLight({ scroll: null, autoScroll: false });
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          const r = shellEl?.querySelector('.gantt-root');
-          if (r) scrollToYmd(r, anchorYmd, false);
-          viewportShiftLock = false;
-        });
-      });
-      return;
-    }
+    if (restoreTimelineAnchor(anchorYmd)) return;
+    if (hostEl) render(hostEl);
+    else ctx.renderBoard?.();
+  }
+
+  function changeTimelineScale(nextZoom) {
+    if (nextZoom !== 'day' && nextZoom !== 'week' && nextZoom !== 'month') return;
+    if (zoom() === nextZoom) return;
+    const root = shellEl?.querySelector('.gantt-root');
+    const anchorYmd = root ? ymdAtTimelineFocus(root) : windowCenter();
+    savePrefs({ ganttZoom: nextZoom, ganttWindowCenter: anchorYmd });
+    setCompactViewportAround(anchorYmd, nextZoom);
+    if (restoreTimelineAnchor(anchorYmd)) return;
     if (hostEl) render(hostEl);
     else ctx.renderBoard?.();
   }
@@ -1479,10 +1552,7 @@ const KuiperGantt = (() => {
     });
 
     toolbar.querySelectorAll('[data-zoom]').forEach(btn => {
-      btn.onclick = () => {
-        savePrefs({ ganttZoom: btn.dataset.zoom });
-        ctx.renderBoard?.();
-      };
+      btn.onclick = () => changeTimelineScale(btn.dataset.zoom);
     });
     toolbar.querySelector('[data-act="prev"]').onclick = () => panTimeline(-1);
     toolbar.querySelector('[data-act="next"]').onclick = () => panTimeline(1);
@@ -1528,6 +1598,7 @@ const KuiperGantt = (() => {
       chart.destroy();
       chart = null;
     }
+    appliedRowDensityKey = null;
   }
 
   return { init, render, destroy };

@@ -761,16 +761,25 @@ function createPixelMapper(scale, viewportStart) {
 //#endregion
 //#region src/lib/timeline/layoutEngine.ts
 const DENSITY = {
-	rowHeight: 32,
-	barHeight: 16,
-	milestoneSize: 12
+	rowHeight: 28,
+	barHeight: 18,
+	milestoneSize: 10
 };
-const ROW_HEIGHT = DENSITY.rowHeight;
-const BAR_HEIGHT = DENSITY.barHeight;
-const BAR_Y_OFFSET = (ROW_HEIGHT - BAR_HEIGHT) / 2;
-const MILESTONE_SIZE = DENSITY.milestoneSize;
+let ROW_HEIGHT = DENSITY.rowHeight;
+let BAR_HEIGHT = DENSITY.barHeight;
+let BAR_Y_OFFSET = (ROW_HEIGHT - BAR_HEIGHT) / 2;
+let MILESTONE_SIZE = DENSITY.milestoneSize;
 /** Half-width of a milestone diamond */
-const MILESTONE_HALF = MILESTONE_SIZE / 2;
+let MILESTONE_HALF = MILESTONE_SIZE / 2;
+function setRowDensity({ rowHeight, barHeight, milestoneSize } = {}) {
+	if (Number.isFinite(rowHeight) && rowHeight > 0) ROW_HEIGHT = rowHeight;
+	if (Number.isFinite(barHeight) && barHeight > 0) BAR_HEIGHT = barHeight;
+	if (Number.isFinite(milestoneSize) && milestoneSize > 0) {
+		MILESTONE_SIZE = milestoneSize;
+		MILESTONE_HALF = MILESTONE_SIZE / 2;
+	}
+	BAR_Y_OFFSET = (ROW_HEIGHT - BAR_HEIGHT) / 2;
+}
 /**
 * Computes pixel-space layout for all visible task rows.
 * Returns a map keyed by task id for O(1) lookup during link routing.
@@ -2326,6 +2335,50 @@ function attachProgressDrag(progressEl, barEl, task, _getMapper, cbs) {
 	};
 }
 /**
+* Attaches drag-to-move on a milestone diamond.
+*
+* @param diamondEl - The milestone diamond DOM element.
+* @param task - The milestone task node.
+* @param getMapper - A function returning the current {@link PixelMapper}.
+* @param cbs - The chart callbacks.
+* @returns A cleanup function that removes all listeners.
+*/
+function attachMilestoneDrag(diamondEl, task, getMapper, cbs) {
+	function onDown(e) {
+		if (e.button !== 0) return;
+		e.preventDefault();
+		try {
+			diamondEl.setPointerCapture(e.pointerId);
+		} catch {}
+		const startX = e.clientX;
+		const originDate = parseDate(task.startDate);
+		const mapper = getMapper();
+		let lastDays = 0;
+		function onMove(me) {
+			const dx = me.clientX - startX;
+			lastDays = Math.round(mapper.widthToDurationDays(dx));
+			cbs.onTaskMove?.({
+				id: task.id,
+				startDate: addDays(originDate, lastDays)
+			});
+		}
+		function onUp() {
+			window.removeEventListener("pointermove", onMove);
+			window.removeEventListener("pointerup", onUp);
+			diamondEl.style.cursor = "grab";
+			if (lastDays !== 0) cbs._onTaskMoveFinal?.({
+				id: task.id,
+				startDate: addDays(originDate, lastDays)
+			});
+		}
+		diamondEl.style.cursor = "grabbing";
+		window.addEventListener("pointermove", onMove);
+		window.addEventListener("pointerup", onUp);
+	}
+	diamondEl.addEventListener("pointerdown", onDown);
+	return () => diamondEl.removeEventListener("pointerdown", onDown);
+}
+/**
 * Attaches click-to-select on a milestone diamond.
 *
 * @param diamondEl - The milestone diamond DOM element.
@@ -2719,7 +2772,7 @@ function renderMilestone(layer, svgLayer, task, layout, selectedId, registry, cb
 		height: `${size}px`,
 		background: "var(--gantt-milestone)",
 		transform: "rotate(45deg)",
-		cursor: readonly ? "default" : "pointer",
+		cursor: readonly ? "default" : "grab",
 		zIndex: "4"
 	});
 	diamond.tabIndex = 0;
@@ -2749,16 +2802,15 @@ function renderMilestone(layer, svgLayer, task, layout, selectedId, registry, cb
 	diamond.append(labelEl);
 	layer.insertBefore(diamond, svgLayer);
 	bindMilestoneTask(diamond, task);
-	const dummy = el("div");
-	let cleanupDrag;
-	if (!readonly) cleanupDrag = attachMilestoneClick(diamond, task.id, cbs);
-	else diamond.addEventListener("click", (event) => {
+	diamond.addEventListener("click", (event) => {
 		if (event.detail === 2) cbs.onTaskDoubleClick?.({
 			id: task.id,
 			task: toTask(task)
 		});
 		else cbs.onTaskClick?.(task.id);
 	});
+	let cleanupDrag;
+	if (!readonly) cleanupDrag = attachMilestoneDrag(diamond, task, () => state.mapper, cbs);
 	let cleanupLinkHandles;
 	if (state.linkCreationEnabled) {
 		const diamondCenterY = layout.y + layout.height / 2;
@@ -2819,7 +2871,7 @@ function renderMilestone(layer, svgLayer, task, layout, selectedId, registry, cb
 	};
 	const entry = {
 		bar: diamond,
-		resizeHandle: dummy
+		resizeHandle: el("div")
 	};
 	if (cleanupDrag !== void 0) entry.cleanupDrag = cleanupDrag;
 	if (cleanupLinkHandles !== void 0) entry.cleanupLinkHandles = cleanupLinkHandles;
@@ -2851,6 +2903,7 @@ function renderRightPane(refs, state, cbs) {
 	for (let i = 0; i < visibleRows.length; i++) {
 		const rowIdx = startIndex + i;
 		const stripe = el("div");
+		stripe.className = "gantt-stripe-row";
 		css(stripe, {
 			height: `${ROW_HEIGHT}px`,
 			background: rowIdx % 2 === 0 ? "var(--gantt-bg)" : "var(--gantt-stripe)",
@@ -3840,6 +3893,6 @@ var GanttChart = class {
 	}
 };
 //#endregion
-export { BAR_HEIGHT, BAR_Y_OFFSET, DEFAULT_GRID_COLUMNS, DENSITY, EN_US_LABELS, GRID_COLUMN_FR_MIN_WIDTH, GanttChart, GanttError, MILESTONE_HALF, MILESTONE_SIZE, ROW_HEIGHT, SCALE_CONFIGS, addDays, addHours, buildTaskTree, computeLayout, createPixelMapper, deriveViewport, deriveWeekNumbering, deriveWeekStartsOn, deriveWeekendDays, detectCycles, diffDays, diffHours, flattenTree, formatLabel, formatWeekNumber, gridColumnDefaults, gridNaturalWidth, gridTemplateColumns, isParent, parseDate, resolveChartLocale, routeLinks, setColumnWidthMultiplier, validateLinkRefs, visibleColumns };
+export { BAR_HEIGHT, BAR_Y_OFFSET, DEFAULT_GRID_COLUMNS, DENSITY, EN_US_LABELS, GRID_COLUMN_FR_MIN_WIDTH, GanttChart, GanttError, MILESTONE_HALF, MILESTONE_SIZE, ROW_HEIGHT, SCALE_CONFIGS, addDays, addHours, buildTaskTree, computeLayout, createPixelMapper, deriveViewport, deriveWeekNumbering, deriveWeekStartsOn, deriveWeekendDays, detectCycles, diffDays, diffHours, flattenTree, formatLabel, formatWeekNumber, gridColumnDefaults, gridNaturalWidth, gridTemplateColumns, isParent, parseDate, resolveChartLocale, routeLinks, setColumnWidthMultiplier, setRowDensity, validateLinkRefs, visibleColumns };
 
 //# sourceMappingURL=index.mjs.map

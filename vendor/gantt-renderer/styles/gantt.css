@@ -17,9 +17,9 @@
 	--gantt-link-hi: #ff6b35;
 
 	/* Structure */
-	--gantt-row-height: 44px;
-	--gantt-bar-height: 28px;
-	--gantt-milestone-size: 20px;
+	--gantt-row-height: 28px;
+	--gantt-bar-height: 18px;
+	--gantt-milestone-size: 10px;
 	--gantt-bg: #fff;
 	--gantt-header-bg: #f8f9fa;
 	--gantt-stripe: #fafbfc;

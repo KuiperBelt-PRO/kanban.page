@@ -192,6 +192,23 @@ const KuiperList = (() => {
     return (st?.epics || []).find(e => e.id === task.epicId) || null;
   }
 
+  function inheritedEpicForTask(task) {
+    if (BoardCore.isSubtask(task) && task.parentId) {
+      const parent = ctx.state?.().tasks?.find(t => t.id === task.parentId);
+      if (parent) return epicOf(parent);
+    }
+    return epicOf(task);
+  }
+
+  function syncSubtasksEpicFromParent(parentId, projectId, epicId) {
+    for (const child of ctx.state?.().tasks || []) {
+      if (child.parentId === parentId && !child.archivedAt) {
+        child.projectId = projectId;
+        child.epicId = epicId || null;
+      }
+    }
+  }
+
   function sprintOf(task) {
     const st = ctx.state?.();
     if (!task?.sprintId) return null;
@@ -337,17 +354,22 @@ const KuiperList = (() => {
     return `<button type="button" class="kuiper-list-star-btn" aria-pressed="${on}" title="${esc(title)}" aria-label="${esc(title)}">${icon}</button>`;
   }
 
-  function epicCellHtml(task, epic) {
-    if (!BoardCore.issueTypeAllowsEpicLink(task.issueType)) return emptyValHtml();
+  function epicCellHtml(epic, { inherited = false } = {}) {
     if (!epic) return emptyValHtml();
-    return `<span class="kuiper-list-trunc">${esc(epic.title)}</span>`;
+    const cls = inherited ? ' kuiper-list-inherited-epic' : '';
+    return `<span class="kuiper-list-trunc${cls}">${esc(epic.title)}</span>`;
   }
 
   function rowHtml(task, { isSubtask = false, childCount = 0 } = {}) {
     const subCls = isSubtask ? ' is-subtask' : '';
     const parentCls = !isSubtask && childCount > 0 && collapsedParents.has(task.id) ? ' is-collapsed' : '';
-    const epic = epicOf(task);
+    const epic = inheritedEpicForTask(task);
     const sprint = sprintOf(task);
+    const epicCol = BoardCore.isSubtask(task)
+      ? `<td class="kuiper-list-cell kuiper-list-epic" title="${esc(tr('listEpicInherited'))}">${epicCellHtml(epic, { inherited: true })}</td>`
+      : (BoardCore.issueTypeAllowsEpicLink(task.issueType)
+        ? editableTd('epic', epicCellHtml(epic), 'kuiper-list-epic')
+        : `<td class="kuiper-list-cell kuiper-list-epic">${emptyValHtml()}</td>`);
     const updatedCell = isCompact()
       ? ''
       : `<td class="kuiper-list-cell kuiper-list-date">${formatUpdated(task.updatedAt)}</td>`;
@@ -359,9 +381,7 @@ const KuiperList = (() => {
       ${editableTd('stage', stageCellDisplay(task))}
       ${editableTd('priority', priorityCellDisplay(task), 'kuiper-list-pri')}
       ${editableTd('project', projectCellDisplay(task), 'kuiper-list-project')}
-      ${BoardCore.issueTypeAllowsEpicLink(task.issueType)
-        ? editableTd('epic', epicCellHtml(task, epic), 'kuiper-list-epic')
-        : `<td class="kuiper-list-cell kuiper-list-epic">${emptyValHtml()}</td>`}
+      ${epicCol}
       ${editableTd('sprint', sprint ? `<span class="kuiper-list-trunc">${esc(sprint.name)}</span>` : emptyValHtml())}
       ${editableTd('start', formatYmdDisplay(task.scheduleStartDate), 'kuiper-list-date')}
       ${editableTd('end', formatYmdDisplay(task.scheduleEndDate), 'kuiper-list-date')}
@@ -410,6 +430,13 @@ const KuiperList = (() => {
     if (!t || typeof KuiperStore === 'undefined') return;
     const snap = taskSnapshot(t);
     localFn(t);
+    if (!BoardCore.isSubtask(t)) {
+      const epicChanged = (snap.epicId || null) !== (t.epicId || null);
+      const projChanged = snap.projectId !== t.projectId;
+      if (epicChanged || projChanged) {
+        syncSubtasksEpicFromParent(taskId, t.projectId, t.epicId);
+      }
+    }
     const apiPatch = apiPatchFromSnapshot(snap, t);
     if (!Object.keys(apiPatch).length) return;
     t.updatedAt = Date.now();

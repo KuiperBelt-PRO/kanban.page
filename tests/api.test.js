@@ -303,4 +303,65 @@ describe('api', () => {
     assert.equal(subTask.issueType, 'subtask');
     assert.equal(subTask.parentId, parent.id);
   });
+
+  it('subtasks inherit epic from parent but keep their own sprint', async () => {
+    const board = await get('/api/v1/boards/hub-delivery');
+    const parent = board.body.data.cards.find(c => c.issue_type === 'task' && !c.parent_id);
+    const stageId = board.body.data.stages[0].id;
+    const epic = (board.body.data.epics || []).find(e => e.project_id === parent.project_id);
+    assert.ok(parent);
+    assert.ok(epic, 'need an epic on parent project');
+
+    const parentEpicPatch = await request('PATCH', `/api/v1/cards/${encodeURIComponent(parent.id)}`, {
+      epic_id: epic.id,
+      sprint_id: null,
+    });
+    assert.equal(parentEpicPatch.status, 200);
+    const parentEpicId = parentEpicPatch.body.data.card.epic_id;
+    assert.ok(parentEpicId);
+
+    const sprintRes = await request('POST', '/api/v1/organizations/kuiperbelt-pro/sprints', {
+      name: 'Sprint subtask test',
+      start_date: '2026-01-01',
+      end_date: '2026-01-14',
+      status: 'active',
+      project_ids: [parent.project_id],
+    });
+    assert.equal(sprintRes.status, 201);
+    const sprintId = sprintRes.body.data.sprint.id;
+
+    const created = await request('POST', '/api/v1/cards', {
+      board_slug: 'hub-delivery',
+      project_id: parent.project_id,
+      stage_id: stageId,
+      title: 'Sub with own sprint',
+      issue_type: 'subtask',
+      parent_id: parent.id,
+      sprint_id: sprintId,
+    });
+    assert.equal(created.status, 201);
+    const subId = created.body.data.card.id;
+    assert.equal(created.body.data.card.epic_id, parentEpicId);
+    assert.equal(created.body.data.card.sprint_id, sprintId);
+
+    await request('PATCH', `/api/v1/cards/${encodeURIComponent(parent.id)}`, {
+      sprint_id: sprintId,
+    });
+    const stateAfterParentSprint = await get('/api/v1/boards/hub-delivery/state');
+    const subAfterParentSprint = stateAfterParentSprint.body.data.tasks.find(t => t.id === subId);
+    assert.equal(subAfterParentSprint.sprintId, sprintId);
+
+    const otherEpic = board.body.data.epics.find(
+      e => e.project_id === parent.project_id && e.id !== parentEpicId,
+    ) || epic;
+    const parentEpicChange = await request('PATCH', `/api/v1/cards/${encodeURIComponent(parent.id)}`, {
+      epic_id: otherEpic.id,
+    });
+    assert.equal(parentEpicChange.status, 200);
+    const nextEpicId = parentEpicChange.body.data.card.epic_id;
+    const stateAfterEpic = await get('/api/v1/boards/hub-delivery/state');
+    const subAfterEpic = stateAfterEpic.body.data.tasks.find(t => t.id === subId);
+    assert.equal(subAfterEpic.epicId, nextEpicId);
+    assert.equal(subAfterEpic.sprintId, sprintId);
+  });
 });

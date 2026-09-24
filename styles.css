@@ -5011,6 +5011,7 @@ html[data-density="compact"] .board.kuiper-calendar { --cal-col-min: 80px; }
 .kuiper-list-star-btn:hover { background: var(--raise); color: var(--text); }
 .kuiper-list-star-btn[aria-pressed="true"] { color: var(--accent-fill); }
 .kuiper-list-epic-proj { color: var(--faint); font-size: 11px; margin-left: 4px; }
+.kuiper-list-inherited-epic { color: var(--muted); font-style: italic; }
 .kuiper-list-editable:hover .kuiper-list-display {
   background: color-mix(in srgb, var(--raise) 80%, transparent);
 }

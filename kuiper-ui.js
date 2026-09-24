@@ -2129,7 +2129,7 @@ const KuiperUI = (() => {
         parentId,
         projectId: parent.projectId,
         epicId: parent.epicId,
-        sprintId: parent.sprintId,
+        sprintId: null,
         columnId,
       });
       await KuiperStore.createCard(body);
@@ -2805,7 +2805,6 @@ const KuiperUI = (() => {
       if (parent) {
         draft.projectId = parent.projectId;
         draft.epicId = parent.epicId || null;
-        draft.sprintId = parent.sprintId || null;
       }
     }
     const typePool = isSub
@@ -2918,7 +2917,7 @@ const KuiperUI = (() => {
     setEditorFieldReadonly('kuiperEdTypeCtrl', isSub);
     setEditorFieldReadonly('kuiperEdProjectCtrl', isSub);
     setEditorFieldReadonly('kuiperEdEpicCtrl', isSub);
-    setEditorFieldReadonly('kuiperEdSprintCtrl', isSub);
+    setEditorFieldReadonly('kuiperEdSprintCtrl', false);
     setEditorFieldReadonly('kuiperEdParentCtrl', isSub);
 
     if (editorEditingId && editorEditingId !== 'new') {

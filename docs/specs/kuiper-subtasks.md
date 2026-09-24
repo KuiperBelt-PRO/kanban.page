@@ -43,7 +43,8 @@
 
 - `project_id`
 - `epic_id` (si el padre tiene épica; si el padre pierde épica, subtarea también)
-- `sprint_id`
+
+**Sprint:** la subtarea puede tener `sprint_id` **distinto** del padre. Al cambiar el sprint del padre **no** se propagan subtareas; al crear una subtarea el sprint por defecto puede ser el del padre o vacío, pero es editable de forma independiente.
 
 La subtarea conserva su propia fila en `cards` (mismo `stage_id`, `position`, notas, tiempo, tags, planificación, links).
 
@@ -64,11 +65,11 @@ stateDiagram-v2
 
 **Comportamiento:**
 
-1. **Crear** (`POST /cards`): si `issue_type` es `subtask`, rechazar sin `parent_id` (`400`, mensaje claro). Tras resolver el padre, **copiar** `project_id`, `epic_id`, `sprint_id` del padre (ignorar valores contradictorios del body o sobrescribirlos).
+1. **Crear** (`POST /cards`): si `issue_type` es `subtask`, rechazar sin `parent_id` (`400`, mensaje claro). Tras resolver el padre, **copiar** `project_id` y `epic_id` del padre. `sprint_id`: si viene en el body, usarlo (validado); si no, por defecto el del padre.
 2. **Actualizar** (`PATCH /cards/:id`):
    - Subtarea: no permitir `parent_id` nulo ni cambiar a tipo no-subtarea sin flujo explícito de «convertir a tarea» (fuera de alcance v1; bloquear o exigir `issue_type` distinto y limpiar `parent_id` en una sola operación).
    - Si se cambia `parent_id`, revalidar ST-1.3 y re-sincronizar herencia.
-   - Si se actualiza el **padre** (`project_id`, `epic_id`, `sprint_id`), **propagar** el mismo valor a todas las subtareas activas (`archived = 0`) con `parent_id = id`.
+   - Si se actualiza el **padre** (`project_id` o `epic_id`), **propagar** esos valores a todas las subtareas activas (`archived = 0`) con `parent_id = id`. El `sprint_id` del padre **no** se propaga.
 3. **Archivar padre:** archivar en cascada todas las subtareas hijas.
 4. **Restaurar padre:** opcional v1 — restaurar hijas que se archivaron en la misma operación (mismo timestamp de evento); si es complejo, documentar «restaurar hijas manualmente» en v1.
 5. **Detalle** (`GET /cards/:id/detail`): incluir `subtasks: CardSummary[]` ordenadas por `position` luego `created_at` (id, título, `stage_id`, `issue_type`, flags de progreso si aplica).

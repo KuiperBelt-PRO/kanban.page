@@ -54,12 +54,12 @@ function listSubtasks(db, parentId) {
   `).all(parentId).map(rowToCard);
 }
 
-function propagateContextToSubtasks(db, parentId, { project_id, epic_id, sprint_id }) {
+function propagateEpicContextToSubtasks(db, parentId, { project_id, epic_id }) {
   const ts = nowIso();
   db.prepare(`
-    UPDATE cards SET project_id = ?, epic_id = ?, sprint_id = ?, updated_at = ?
+    UPDATE cards SET project_id = ?, epic_id = ?, updated_at = ?
     WHERE parent_id = ? AND archived = 0
-  `).run(project_id, epic_id, sprint_id, ts, parentId);
+  `).run(project_id, epic_id, ts, parentId);
 }
 
 function getParentRow(db, parentId) {
@@ -133,7 +133,14 @@ function create(db, {
     if (!project) throw new Error('project not found');
     assertProjectOnBoard(db, board.id, project.id);
     epicId = parent.epic_id || null;
-    sprintId = parent.sprint_id || null;
+    if (sprint_id !== undefined) {
+      sprintId = sprint_id || null;
+      if (sprintId) {
+        sprints.assertCardSprint(db, { sprint_id: sprintId, project_id: project.id, board_id: board.id });
+      }
+    } else {
+      sprintId = parent.sprint_id || null;
+    }
   } else {
     if (epic_id && allowsEpicLink(issueType)) {
       epicId = resolveEpicRef(db, epics, project.id, epic_id);
@@ -246,7 +253,18 @@ function update(db, id, fields) {
     if (!parent || parent.archived) throw new Error('parent issue not found');
     projectId = parent.project_id;
     epicId = parent.epic_id || null;
-    sprintId = parent.sprint_id || null;
+    if (fields.sprint_id !== undefined) {
+      if (fields.sprint_id) {
+        sprints.assertCardSprint(db, {
+          sprint_id: fields.sprint_id,
+          project_id: projectId,
+          board_id: card.board_id,
+        });
+        sprintId = fields.sprint_id;
+      } else {
+        sprintId = null;
+      }
+    }
   } else if (fields.sprint_id !== undefined) {
     if (fields.sprint_id) {
       sprints.assertCardSprint(db, {
@@ -333,16 +351,14 @@ function update(db, id, fields) {
       payload: { tags: fields.tags },
     });
   }
-  const contextChanged = !allowsParentLink(issueType) && (
+  const epicContextChanged = !allowsParentLink(issueType) && (
     projectId !== card.project_id
     || epicId !== (card.epic_id || null)
-    || sprintId !== (card.sprint_id || null)
   );
-  if (contextChanged) {
-    propagateContextToSubtasks(db, id, {
+  if (epicContextChanged) {
+    propagateEpicContextToSubtasks(db, id, {
       project_id: projectId,
       epic_id: epicId,
-      sprint_id: sprintId,
     });
   }
 

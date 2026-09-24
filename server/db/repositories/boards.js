@@ -125,6 +125,8 @@ function getSnapshot(db, idOrSlug) {
   const cardsRepo = require('./cards.js');
   const cardDetail = require('./card-detail.js');
   const cardRows = cardsRepo.listByBoard(db, board.id, { includeArchived: true });
+  const sprintsRepo = require('./sprints.js');
+  const sprintRows = sprintsRepo.listForBoard(db, board.id);
   const snapshot = {
     board: {
       id: board.id,
@@ -138,6 +140,7 @@ function getSnapshot(db, idOrSlug) {
       name: p.name,
       code: p.code || null,
       description: p.description,
+      color: p.color || null,
     })),
     stages: stageRows.map(s => ({
       id: s.id,
@@ -149,11 +152,91 @@ function getSnapshot(db, idOrSlug) {
       project_id: e.project_id,
       title: e.title,
       status: e.status,
+      sprint_id: e.sprint_id || null,
+    })),
+    sprints: sprintRows.map(s => ({
+      id: s.id,
+      slug: s.slug,
+      name: s.name,
+      goal: s.goal,
+      start_date: s.start_date,
+      end_date: s.end_date,
+      status: s.status,
+      project_ids: s.project_ids,
     })),
     cards: cardRows,
     version: getVersion(db, board.id),
   };
   return cardDetail.enrichSnapshot(db, snapshot);
+}
+
+function updateBoard(db, boardId, { name }) {
+  const board = getById(db, boardId);
+  if (!board) throw new Error('board not found');
+  const finalName = name != null ? name : board.name;
+  const ts = nowIso();
+  db.prepare('UPDATE boards SET name = ?, updated_at = ? WHERE id = ?')
+    .run(finalName, ts, boardId);
+  bumpVersion(db, boardId);
+  return getById(db, boardId);
+}
+
+function createStage(db, boardId, name) {
+  const board = getById(db, boardId);
+  if (!board) throw new Error('board not found');
+  const trimmed = String(name || '').trim();
+  if (!trimmed) throw new Error('stage name required');
+  const max = db.prepare('SELECT MAX(position) AS m FROM board_stages WHERE board_id = ?').get(boardId);
+  const position = (max?.m || 0) + 1;
+  const id = entityId();
+  db.prepare(`
+    INSERT INTO board_stages(id, board_id, name, position) VALUES (?, ?, ?, ?)
+  `).run(id, boardId, trimmed, position);
+  bumpVersion(db, boardId);
+  return db.prepare('SELECT * FROM board_stages WHERE id = ?').get(id);
+}
+
+function updateStage(db, boardId, stageId, { name }) {
+  const stage = db.prepare('SELECT * FROM board_stages WHERE id = ? AND board_id = ?').get(stageId, boardId);
+  if (!stage) throw new Error('stage not found');
+  const trimmed = name != null ? String(name).trim() : stage.name;
+  if (!trimmed) throw new Error('stage name required');
+  db.prepare('UPDATE board_stages SET name = ? WHERE id = ?').run(trimmed, stageId);
+  bumpVersion(db, boardId);
+  return db.prepare('SELECT * FROM board_stages WHERE id = ?').get(stageId);
+}
+
+function deleteStage(db, boardId, stageId) {
+  const stage = db.prepare('SELECT * FROM board_stages WHERE id = ? AND board_id = ?').get(stageId, boardId);
+  if (!stage) throw new Error('stage not found');
+  const n = db.prepare('SELECT COUNT(*) AS c FROM cards WHERE stage_id = ? AND archived = 0').get(stageId);
+  if (n.c > 0) throw new Error('stage has cards');
+  const count = db.prepare('SELECT COUNT(*) AS c FROM board_stages WHERE board_id = ?').get(boardId);
+  if (count.c <= 1) throw new Error('board needs at least one stage');
+  db.prepare('DELETE FROM board_stages WHERE id = ?').run(stageId);
+  bumpVersion(db, boardId);
+  return { removed: true };
+}
+
+function reorderStages(db, boardId, order) {
+  const ids = Array.isArray(order) ? order : [];
+  const stages = listStages(db, boardId);
+  if (ids.length !== stages.length) throw new Error('invalid stage order');
+  const set = new Set(stages.map(s => s.id));
+  for (const id of ids) {
+    if (!set.has(id)) throw new Error('invalid stage id in order');
+  }
+  const upd = db.prepare('UPDATE board_stages SET position = ? WHERE id = ? AND board_id = ?');
+  ids.forEach((id, index) => upd.run(index + 1, id, boardId));
+  bumpVersion(db, boardId);
+  return listStages(db, boardId);
+}
+
+function getMembership(db, boardId) {
+  return {
+    projects: listProjects(db, boardId),
+    stages: listStages(db, boardId),
+  };
 }
 
 module.exports = {
@@ -169,4 +252,10 @@ module.exports = {
   getSnapshot,
   bumpVersion,
   getVersion,
+  updateBoard,
+  createStage,
+  updateStage,
+  deleteStage,
+  reorderStages,
+  getMembership,
 };

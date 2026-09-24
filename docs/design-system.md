@@ -666,7 +666,7 @@ flowchart TB
 | min-height | `min(90vh, 860px)` |
 | max-height | `min(96vh, 980px)` |
 | top | `2vh` |
-| aside width | 248px |
+| aside width | `minmax(272px, 300px)` |
 | main padding | `8px 22px 18px` |
 | aside padding | `8px 14px 18px 12px` |
 | tabs min-height | 160px; flex `1 1 38%` |

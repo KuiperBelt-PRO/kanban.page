@@ -75,6 +75,33 @@ function listRepos(db, projectId) {
     .all(projectId);
 }
 
+function update(db, id, fields) {
+  const project = getById(db, id);
+  if (!project) throw new Error('project not found');
+  const name = fields.name != null ? fields.name : project.name;
+  const description = fields.description !== undefined ? fields.description : project.description;
+  const color = fields.color !== undefined ? fields.color : project.color;
+  const ts = nowIso();
+  db.prepare(`
+    UPDATE projects SET name = ?, description = ?, color = ?, updated_at = ?
+    WHERE id = ?
+  `).run(name, description, color, ts, id);
+  return getById(db, id);
+}
+
+function remove(db, id) {
+  const project = getById(db, id);
+  if (!project) throw new Error('project not found');
+  const n = db.prepare('SELECT COUNT(*) AS c FROM cards WHERE project_id = ?').get(id);
+  if (n.c > 0) throw new Error('project has cards');
+  db.prepare('DELETE FROM board_projects WHERE project_id = ?').run(id);
+  db.prepare('DELETE FROM sprint_projects WHERE project_id = ?').run(id);
+  db.prepare('DELETE FROM project_github_repos WHERE project_id = ?').run(id);
+  db.prepare('DELETE FROM epics WHERE project_id = ?').run(id);
+  db.prepare('DELETE FROM projects WHERE id = ?').run(id);
+  return { removed: true };
+}
+
 module.exports = {
-  create, getById, getByOrgSlug, listByOrg, linkRepo, listRepos, ensureCode,
+  create, getById, getByOrgSlug, listByOrg, linkRepo, listRepos, ensureCode, update, remove,
 };

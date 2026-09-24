@@ -23,7 +23,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "test": "node --test tests/core.test.js tests/cli.test.js tests/db.test.js tests/kuiper-cli.test.js tests/api.test.js"
+    "test": "node --test tests/core.test.js tests/cli.test.js tests/db.test.js tests/kuiper-cli.test.js tests/api.test.js tests/list.test.js"
   },
   "repository": {
     "type": "git",

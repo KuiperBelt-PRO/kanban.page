@@ -33,7 +33,7 @@ describe('db migrate', () => {
     const db = openDb();
     const first = migrate(db);
     const second = migrate(db);
-    assert.equal(first.version, 5);
+    assert.equal(first.version, 8);
     assert.equal(second.applied, 0);
   });
 
@@ -48,5 +48,30 @@ describe('db migrate', () => {
     assert.ok(isCardId(card.id));
     const dup = db.prepare('SELECT COUNT(*) AS n FROM cards WHERE id = ?').get(card.id);
     assert.equal(dup.n, 1);
+  });
+
+  it('stores issue type and links story to epic card', () => {
+    const db = openDb();
+    migrate(db);
+    const org = orgs.create(db, { slug: 'acme', name: 'Acme' });
+    const project = projects.create(db, { organization_id: org.id, slug: 'p1', name: 'P1', code: 'P1' });
+    const { board } = boards.create(db, { organization_id: org.id, slug: 'b1', name: 'B1', project_ids: [project.id] });
+    const epicCard = cards.create(db, {
+      board_id: board.id,
+      project_id: project.id,
+      title: 'Big epic',
+      stage: 'INBOX',
+      issue_type: 'epic',
+    });
+    const story = cards.create(db, {
+      board_id: board.id,
+      project_id: project.id,
+      title: 'Story one',
+      stage: 'INBOX',
+      issue_type: 'story',
+      epic_id: epicCard.id,
+    });
+    assert.equal(story.issue_type, 'story');
+    assert.equal(story.epic_id, epicCard.id);
   });
 });

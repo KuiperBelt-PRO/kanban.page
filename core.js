@@ -1398,6 +1398,83 @@ const BoardCore = (() => {
     return `${m}m`;
   }
 
+  /** Inclusive ISO date range overlap. */
+  function datesOverlap(aStart, aEnd, bStart, bEnd) {
+    if (!aStart || !aEnd || !bStart || !bEnd) return false;
+    return aStart <= bEnd && bStart <= aEnd;
+  }
+
+  function sprintOverlapsRange(sprint, viewStart, viewEnd) {
+    if (!sprint || !viewStart || !viewEnd) return false;
+    const start = sprint.startDate || sprint.start_date;
+    const end = sprint.endDate || sprint.end_date;
+    return datesOverlap(start, end, viewStart, viewEnd);
+  }
+
+  function sortSprintsForUi(list) {
+    const copy = [...(list || [])];
+    copy.sort((a, b) => {
+      const aActive = a.status === 'active' ? 1 : 0;
+      const bActive = b.status === 'active' ? 1 : 0;
+      if (bActive !== aActive) return bActive - aActive;
+      const as = a.startDate || a.start_date || '';
+      const bs = b.startDate || b.start_date || '';
+      return bs.localeCompare(as) || (a.name || '').localeCompare(b.name || '');
+    });
+    return copy;
+  }
+
+  const ISSUE_TYPES = ['initiative', 'epic', 'story', 'task', 'bug', 'spike', 'subtask'];
+  const DEFAULT_ISSUE_TYPE = 'task';
+
+  function normalizeIssueType(raw) {
+    const t = String(raw || '').toLowerCase();
+    return ISSUE_TYPES.includes(t) ? t : DEFAULT_ISSUE_TYPE;
+  }
+
+  function issueTypeAllowsEpicLink(type) {
+    const t = normalizeIssueType(type);
+    return t === 'story' || t === 'task' || t === 'bug' || t === 'spike';
+  }
+
+  function issueTypeAllowsParent(type) {
+    return normalizeIssueType(type) === 'subtask';
+  }
+
+  function issueTypeIsEpic(type) {
+    return normalizeIssueType(type) === 'epic';
+  }
+
+  function isSubtask(task) {
+    if (!task) return false;
+    if (task.parentId) return true;
+    return normalizeIssueType(task.issueType) === 'subtask';
+  }
+
+  function isBoardTopLevelTask(task) {
+    return !!task && !isSubtask(task);
+  }
+
+  function sortedStages(columns) {
+    if (!columns?.length) return [];
+    return [...columns].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  }
+
+  function firstStageId(columns) {
+    const cols = sortedStages(columns);
+    return cols[0]?.id ?? null;
+  }
+
+  function terminalStageId(columns) {
+    const cols = sortedStages(columns);
+    return cols.length ? cols[cols.length - 1].id : null;
+  }
+
+  function subtaskIsDone(task, columns) {
+    const terminal = terminalStageId(columns);
+    return !!terminal && task?.columnId === terminal;
+  }
+
   return {
     TZ, MONTHS, DAYS, uid,
     ymd, addDays, weekdayIndex, weekdayName, mondayOf, weekRange, weekLabel, dayLabel, contains,
@@ -1415,6 +1492,10 @@ const BoardCore = (() => {
     buildBlockingGraph, blockingSuccessors, detectBlockingCycle,
     scheduleDayDelta, minDeltaForFinishToStart, cascadeScheduleMove, cascadeEndResize, cascadeAfterResizeEnd,
     daysBetweenInclusive, compareYmd,
+    datesOverlap, sprintOverlapsRange, sortSprintsForUi,
+    ISSUE_TYPES, DEFAULT_ISSUE_TYPE, normalizeIssueType,
+    issueTypeAllowsEpicLink, issueTypeAllowsParent, issueTypeIsEpic,
+    isSubtask, isBoardTopLevelTask, sortedStages, firstStageId, terminalStageId, subtaskIsDone,
   };
 })();
 

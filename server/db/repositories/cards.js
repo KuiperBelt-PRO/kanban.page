@@ -8,6 +8,14 @@ const epics = require('./epics.js');
 const events = require('./events.js');
 const tags = require('./tags.js');
 const { resolveScheduleFields } = require('../../schedule.js');
+const sprints = require('./sprints.js');
+const {
+  normalizeIssueType,
+  allowsEpicLink,
+  allowsParentLink,
+  resolveEpicRef,
+  resolveParentRef,
+} = require('../../issue-types.js');
 
 function assertProjectOnBoard(db, boardId, projectId) {
   const row = db.prepare('SELECT 1 AS n FROM board_projects WHERE board_id = ? AND project_id = ?')
@@ -30,6 +38,35 @@ function nextPosition(db, stageId) {
   const row = db.prepare('SELECT MAX(position) AS m FROM cards WHERE stage_id = ? AND archived = 0')
     .get(stageId);
   return (row && row.m != null ? row.m : -1) + 1;
+}
+
+function nextSubtaskPosition(db, parentId) {
+  const row = db.prepare(`
+    SELECT MAX(position) AS m FROM cards WHERE parent_id = ? AND archived = 0
+  `).get(parentId);
+  return (row && row.m != null ? row.m : -1) + 1;
+}
+
+function listSubtasks(db, parentId) {
+  return db.prepare(`
+    SELECT * FROM cards WHERE parent_id = ? AND archived = 0
+    ORDER BY position ASC, created_at ASC
+  `).all(parentId).map(rowToCard);
+}
+
+function propagateContextToSubtasks(db, parentId, { project_id, epic_id, sprint_id }) {
+  const ts = nowIso();
+  db.prepare(`
+    UPDATE cards SET project_id = ?, epic_id = ?, sprint_id = ?, updated_at = ?
+    WHERE parent_id = ? AND archived = 0
+  `).run(project_id, epic_id, sprint_id, ts, parentId);
+}
+
+function getParentRow(db, parentId) {
+  return db.prepare(`
+    SELECT id, board_id, project_id, epic_id, sprint_id, issue_type, archived
+    FROM cards WHERE id = ?
+  `).get(parentId);
 }
 
 function getById(db, id) {
@@ -55,6 +92,9 @@ function create(db, {
   stage_id,
   stage,
   epic_id,
+  sprint_id,
+  issue_type,
+  parent_id,
   flagged,
   priority,
   estimated_minutes,
@@ -66,16 +106,44 @@ function create(db, {
   if (!board && board_slug) board = boards.resolveBoard(db, board_slug);
   if (!board) throw new Error('board not found');
 
+  const issueType = normalizeIssueType(issue_type);
   let project = project_id ? projects.getById(db, project_id) : null;
   if (!project && project_slug && organization_slug) {
     project = projects.getByOrgSlug(db, organization_slug, project_slug);
   }
+  if (issueType === 'subtask' && parent_id) {
+    const parentPreview = getParentRow(db, parent_id);
+    if (!parentPreview || parentPreview.archived || parentPreview.board_id !== board.id) {
+      throw new Error('parent issue not found');
+    }
+    if (parentPreview.issue_type === 'subtask') throw new Error('parent cannot be a sub-task');
+    project = projects.getById(db, parentPreview.project_id);
+  }
   if (!project) throw new Error('project not found');
   assertProjectOnBoard(db, board.id, project.id);
+  let epicId = null;
+  let parentId = null;
+  let sprintId = sprint_id || null;
 
-  if (epic_id) {
-    const epic = epics.getById(db, epic_id);
-    if (!epic || epic.project_id !== project.id) throw new Error('epic not found for project');
+  if (issueType === 'subtask') {
+    if (!parent_id) throw new Error('sub-task requires parent');
+    parentId = resolveParentRef(db, board.id, project.id, parent_id, issueType);
+    const parent = getParentRow(db, parentId);
+    project = projects.getById(db, parent.project_id);
+    if (!project) throw new Error('project not found');
+    assertProjectOnBoard(db, board.id, project.id);
+    epicId = parent.epic_id || null;
+    sprintId = parent.sprint_id || null;
+  } else {
+    if (epic_id && allowsEpicLink(issueType)) {
+      epicId = resolveEpicRef(db, epics, project.id, epic_id);
+    }
+    if (parent_id) {
+      parentId = resolveParentRef(db, board.id, project.id, parent_id, issueType);
+    }
+    if (sprintId) {
+      sprints.assertCardSprint(db, { sprint_id: sprintId, project_id: project.id, board_id: board.id });
+    }
   }
 
   const stageRow = resolveStage(db, board.id, stage_id || stage);
@@ -85,19 +153,25 @@ function create(db, {
   );
   const { id, issue_number } = nextCardIdentity(db, project.id);
   const ts = nowIso();
-  const position = nextPosition(db, stageRow.id);
+  const position = parentId
+    ? nextSubtaskPosition(db, parentId)
+    : nextPosition(db, stageRow.id);
   db.prepare(`
     INSERT INTO cards(
-      id, project_id, board_id, epic_id, stage_id, position, title, notes,
+      id, project_id, board_id, epic_id, sprint_id, issue_type, parent_id,
+      stage_id, position, title, notes,
       session_ref, flagged, priority, estimated_minutes,
       schedule_start_date, schedule_end_date,
       issue_number, archived, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
   `).run(
     id,
     project.id,
     board.id,
-    epic_id || null,
+    epicId,
+    sprintId,
+    issueType,
+    parentId,
     stageRow.id,
     position,
     title,
@@ -135,14 +209,54 @@ function update(db, id, fields) {
     projectId = fields.project_id;
   }
 
+  let issueType = normalizeIssueType(
+    fields.issue_type !== undefined ? fields.issue_type : card.issue_type,
+  );
   let epicId = card.epic_id;
-  if (fields.epic_id !== undefined) {
-    if (fields.epic_id) {
-      const epic = epics.getById(db, fields.epic_id);
-      if (!epic || epic.project_id !== projectId) throw new Error('epic not found for project');
-      epicId = fields.epic_id;
+  if (fields.epic_id !== undefined || fields.issue_type !== undefined) {
+    const rawEpic = fields.epic_id !== undefined ? fields.epic_id : card.epic_id;
+    if (rawEpic && allowsEpicLink(issueType)) {
+      epicId = resolveEpicRef(db, epics, projectId, rawEpic);
     } else {
       epicId = null;
+    }
+  } else if (!allowsEpicLink(issueType)) {
+    epicId = null;
+  }
+
+  let parentId = card.parent_id;
+  if (fields.parent_id !== undefined || fields.issue_type !== undefined) {
+    const rawParent = fields.parent_id !== undefined ? fields.parent_id : card.parent_id;
+    if (rawParent && allowsParentLink(issueType)) {
+      parentId = resolveParentRef(db, card.board_id, projectId, rawParent, issueType);
+    } else {
+      parentId = null;
+    }
+  } else if (!allowsParentLink(issueType)) {
+    parentId = null;
+  }
+
+  if (issueType === 'subtask' && !parentId) {
+    throw new Error('sub-task requires parent');
+  }
+
+  let sprintId = card.sprint_id;
+  if (issueType === 'subtask' && parentId) {
+    const parent = getParentRow(db, parentId);
+    if (!parent || parent.archived) throw new Error('parent issue not found');
+    projectId = parent.project_id;
+    epicId = parent.epic_id || null;
+    sprintId = parent.sprint_id || null;
+  } else if (fields.sprint_id !== undefined) {
+    if (fields.sprint_id) {
+      sprints.assertCardSprint(db, {
+        sprint_id: fields.sprint_id,
+        project_id: projectId,
+        board_id: card.board_id,
+      });
+      sprintId = fields.sprint_id;
+    } else {
+      sprintId = null;
     }
   }
 
@@ -163,12 +277,14 @@ function update(db, id, fields) {
   const ts = nowIso();
 
   db.prepare(`
-    UPDATE cards SET project_id = ?, epic_id = ?, title = ?, notes = ?,
+    UPDATE cards SET project_id = ?, epic_id = ?, sprint_id = ?, issue_type = ?, parent_id = ?,
+      title = ?, notes = ?,
       session_ref = ?, flagged = ?, priority = ?, estimated_minutes = ?,
       schedule_start_date = ?, schedule_end_date = ?, updated_at = ?
     WHERE id = ?
   `).run(
-    projectId, epicId, title, notes, sessionRef, flagged, priority, estimatedMinutes,
+    projectId, epicId, sprintId, issueType, parentId, title, notes, sessionRef, flagged, priority,
+    estimatedMinutes,
     schedule.schedule_start_date, schedule.schedule_end_date, ts, id,
   );
 
@@ -217,6 +333,19 @@ function update(db, id, fields) {
       payload: { tags: fields.tags },
     });
   }
+  const contextChanged = !allowsParentLink(issueType) && (
+    projectId !== card.project_id
+    || epicId !== (card.epic_id || null)
+    || sprintId !== (card.sprint_id || null)
+  );
+  if (contextChanged) {
+    propagateContextToSubtasks(db, id, {
+      project_id: projectId,
+      epic_id: epicId,
+      sprint_id: sprintId,
+    });
+  }
+
   boards.bumpVersion(db, card.board_id);
   return getById(db, id);
 }
@@ -257,6 +386,10 @@ function archive(db, id, archived = true) {
     event_type: archived ? 'archived' : 'restored',
     payload: {},
   });
+  if (archived && card.issue_type !== 'subtask') {
+    const children = db.prepare('SELECT id FROM cards WHERE parent_id = ? AND archived = 0').all(id);
+    for (const child of children) archive(db, child.id, true);
+  }
   boards.bumpVersion(db, card.board_id);
   return getById(db, id);
 }
@@ -264,6 +397,7 @@ function archive(db, id, archived = true) {
 module.exports = {
   getById,
   listByBoard,
+  listSubtasks,
   create,
   update,
   move,

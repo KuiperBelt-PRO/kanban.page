@@ -1,3 +1,6 @@
+# CodeGraph: índice local por máquina (SQLite en .codegraph/)
+.codegraph/
+
 .DS_Store
 node_modules/
 site/_og/og-1200.*

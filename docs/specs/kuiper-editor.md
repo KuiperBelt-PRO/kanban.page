@@ -23,10 +23,23 @@
 
 1. Izquierda: ID tarjeta (solo si no es `new`).
 2. Derecha (`.kuiper-editor-tools`, `margin-left: auto`):
-   - Menú `⋯` (guardar duplicado, archivar, eliminar).
-   - Botón primario **Crear** (nueva) o **Guardar** (existente).
-   - Cerrar ✕ (descartar).
+   - Menú `⋯` (archivar, eliminar).
+   - Botón primario **Crear** (solo tarjeta nueva).
+   - Cerrar ✕ (cierra; los cambios ya están guardados en edición).
 3. Pie clásico `#f-save` oculto en layout Kuiper.
+
+### Persistencia en edición (tarjeta existente)
+
+Los campos principales se guardan **sin cerrar** el editor:
+
+| Campo | Momento |
+| --- | --- |
+| Título, notas, session (si visible) | Debounce ~450 ms tras escribir; al cerrar editor |
+| Desplegables aside (tipo, etapa, proyecto, padre, épica, sprint, prioridad) | Tras elegir opción |
+| Flag | Al pulsar |
+| Fechas planificación | Tras elegir fecha válida en el picker |
+| Tags, enlaces, comentarios, tiempo manual | Igual que antes (API inmediata) |
+| Timer | Solo al **Stop** (sin cambio) |
 
 ---
 
@@ -56,7 +69,7 @@ Bloques adicionales (`kuiper-issue-panel`):
    - Grupos `blockedBy`, `blocks`, `related`.
    - Compose: selector tipo (portal fixed) + buscador flotante de tarjetas.
    - Excluir self y ya enlazadas del suggest.
-4. Tabs: Comentarios | Time log | Historial.
+5. Tabs (`kuiper-issue-panel`): Comentarios | Time log | Historial | Subtareas (última; solo padre) — ver [`kuiper-subtasks.md`](kuiper-subtasks.md) §ST-4.
 
 ---
 
@@ -93,9 +106,10 @@ Bloques adicionales (`kuiper-issue-panel`):
 
 ## Atajos
 
-- `Ctrl/Cmd+Enter` o Enter en título → guardar.
-- `Escape` → cerrar/descartar según contexto.
-- Click scrim → guardar editor abierto.
+- Tarjeta **nueva**: `Ctrl/Cmd+Enter` o botón **Crear** confirma el alta.
+- Tarjeta **existente**: `Ctrl/Cmd+Enter` fuerza guardado inmediato; Enter en título hace blur (autosave).
+- `Escape` → cerrar editor (Kuiper: cambios ya persistidos salvo borrador inválido de fechas).
+- Click scrim → cerrar editor (Kuiper existente); crear sigue usando **Crear**.
 
 ---
 

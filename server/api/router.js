@@ -12,6 +12,7 @@ const cardDetail = require('../db/repositories/card-detail.js');
 const { snapshotToState, attachOrganization } = require('../board-view.js');
 const { buildNavigation } = require('../navigation.js');
 const { sendJson, readBody, cors } = require('./middleware.js');
+const { handleWorkspaceRoutes } = require('./workspace-routes.js');
 
 function notFound(res) {
   sendJson(res, 404, { ok: false, error: { code: 'not_found', message: 'not found' } });
@@ -243,9 +244,16 @@ async function handleApi(req, res, db, urlPath, method) {
     try {
       const id = decodeURIComponent(cardMatch[1]);
       const body = await readBody(req);
-      let result;
       if (body.stage_id || body.stage) {
-        result = cards.move(db, id, body);
+        const result = cards.move(db, id, body);
+        const rest = { ...body };
+        delete rest.stage_id;
+        delete rest.stage;
+        delete rest.position;
+        if (Object.keys(rest).length) {
+          const card = cards.update(db, id, rest);
+          return sendJson(res, 200, { ok: true, data: { ...result, card } });
+        }
         return sendJson(res, 200, { ok: true, data: result });
       }
       const card = cards.update(db, id, body);
@@ -255,6 +263,9 @@ async function handleApi(req, res, db, urlPath, method) {
     }
   }
 
+  const handled = await handleWorkspaceRoutes(req, res, db, urlPath, method, { badRequest, notFound });
+  if (handled !== false) return handled;
+
   return notFound(res);
 }
 
@@ -262,7 +273,7 @@ const STATIC_ROOT = path.join(__dirname, '..', '..');
 const STATIC_FILES = new Set([
   'index.html', 'app.js', 'core.js', 'i18n.js', 'styles.css',
   'kuiper-store.js', 'kuiper-datetime-picker.js', 'kuiper-issue-panel.js', 'kuiper-ui.js',
-  'kuiper-calendar.js', 'kuiper-gantt.js', 'tooltip.js',
+  'kuiper-calendar.js', 'kuiper-list.js', 'kuiper-gantt.js', 'kuiper-workspace-admin.js', 'tooltip.js',
   'manifest.webmanifest', 'sw.js', 'qr.js',
 ]);
 

@@ -179,6 +179,40 @@ describe('api', () => {
     assert.ok(after.body.data.events.length >= 3);
   });
 
+  it('patches issue_type on cards', async () => {
+    const board = await get('/api/v1/boards/hub-delivery');
+    const cardId = board.body.data.cards[0].id;
+
+    const patched = await request('PATCH', `/api/v1/cards/${encodeURIComponent(cardId)}`, {
+      issue_type: 'bug',
+    });
+    assert.equal(patched.status, 200);
+    assert.equal(patched.body.data.card.issue_type, 'bug');
+
+    const state = await get('/api/v1/boards/hub-delivery/state');
+    const task = state.body.data.tasks.find(t => t.id === cardId);
+    assert.equal(task.issueType, 'bug');
+  });
+
+  it('patches issue_type together with stage move', async () => {
+    const board = await get('/api/v1/boards/hub-delivery');
+    const cardId = board.body.data.cards[0].id;
+    const stages = board.body.data.stages;
+    const otherStage = stages.find(s => s.id !== board.body.data.cards[0].stage_id) || stages[0];
+
+    const patched = await request('PATCH', `/api/v1/cards/${encodeURIComponent(cardId)}`, {
+      stage_id: otherStage.id,
+      issue_type: 'story',
+    });
+    assert.equal(patched.status, 200);
+    assert.equal(patched.body.data.card.issue_type, 'story');
+
+    const state = await get('/api/v1/boards/hub-delivery/state');
+    const task = state.body.data.tasks.find(t => t.id === cardId);
+    assert.equal(task.issueType, 'story');
+    assert.equal(task.columnId, otherStage.id);
+  });
+
   it('supports schedule dates on cards', async () => {
     const board = await get('/api/v1/boards/hub-delivery');
     const cardId = board.body.data.cards[0].id;
@@ -201,5 +235,72 @@ describe('api', () => {
       schedule_end_date: '2026-09-15',
     });
     assert.equal(bad.status, 400);
+  });
+
+  it('creates sprint and patches card sprint_id', async () => {
+    const board = await get('/api/v1/boards/hub-delivery');
+    const projectIds = board.body.data.projects.slice(0, 2).map(p => p.id);
+    assert.ok(projectIds.length >= 1);
+
+    const created = await request('POST', '/api/v1/organizations/kuiperbelt-pro/sprints', {
+      name: 'Sprint test API',
+      start_date: '2026-10-01',
+      end_date: '2026-10-14',
+      status: 'active',
+      project_ids: projectIds,
+    });
+    assert.equal(created.status, 201);
+    const sprintId = created.body.data.sprint.id;
+    assert.ok(sprintId);
+
+    const cardId = board.body.data.cards[0].id;
+    const patched = await request('PATCH', `/api/v1/cards/${encodeURIComponent(cardId)}`, {
+      sprint_id: sprintId,
+    });
+    assert.equal(patched.status, 200);
+    assert.equal(patched.body.data.card.sprint_id, sprintId);
+
+    const state = await get('/api/v1/boards/hub-delivery/state');
+    const task = state.body.data.tasks.find(t => t.id === cardId);
+    assert.equal(task.sprintId, sprintId);
+    assert.ok(Array.isArray(state.body.data.sprints));
+    assert.ok(state.body.data.sprints.some(s => s.id === sprintId));
+  });
+
+  it('subtasks require parent and inherit project from parent', async () => {
+    const board = await get('/api/v1/boards/hub-delivery');
+    const parent = board.body.data.cards.find(c => c.issue_type !== 'subtask');
+    const stageId = board.body.data.stages[0].id;
+
+    const orphan = await request('POST', '/api/v1/cards', {
+      board_slug: 'hub-delivery',
+      project_id: parent.project_id,
+      stage_id: stageId,
+      title: 'Orphan subtask',
+      issue_type: 'subtask',
+    });
+    assert.equal(orphan.status, 400);
+
+    const created = await request('POST', '/api/v1/cards', {
+      board_slug: 'hub-delivery',
+      project_id: parent.project_id,
+      stage_id: stageId,
+      title: 'Nested subtask',
+      issue_type: 'subtask',
+      parent_id: parent.id,
+    });
+    assert.equal(created.status, 201);
+    const subId = created.body.data.card.id;
+    assert.equal(created.body.data.card.parent_id, parent.id);
+    assert.equal(created.body.data.card.project_id, parent.project_id);
+
+    const detail = await get(`/api/v1/cards/${encodeURIComponent(parent.id)}/detail`);
+    assert.ok(detail.body.data.subtasks.some(s => s.id === subId));
+
+    const state = await get('/api/v1/boards/hub-delivery/state');
+    const subTask = state.body.data.tasks.find(t => t.id === subId);
+    assert.ok(subTask);
+    assert.equal(subTask.issueType, 'subtask');
+    assert.equal(subTask.parentId, parent.id);
   });
 });

@@ -3,6 +3,8 @@ const KuiperUI = (() => {
   let ctx = {};
   let navigation = null;
   let dropBound = false;
+  /** Etapa a restaurar al desmarcar «hecha» (solo UI; no persiste en servidor). */
+  const subtaskStageBeforeDone = new Map();
 
   const STAGE_LABELS = {
     en: { INBOX: 'Inbox', DOING: 'Doing', WAITING: 'Waiting', DONE: 'Done' },
@@ -24,12 +26,14 @@ const KuiperUI = (() => {
     starFill: '<svg viewBox="0 0 16 16" fill="currentColor" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><path d="M8 2.5L9.47 6.28 13.52 6.51 10.38 9.07 11.41 12.99 8 10.8 4.59 12.99 5.62 9.07 2.48 6.51 6.53 6.28Z"/></svg>',
     filter: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 3.5h11L9.5 9v4l-3 1.5V9L2.5 3.5z"/></svg>',
     copy: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><rect x="5.5" y="5.5" width="7" height="7" rx="1"/><path d="M10.5 5.5V4A1.5 1.5 0 0 0 9 2.5H4A1.5 1.5 0 0 0 2.5 4v5A1.5 1.5 0 0 0 4 10.5h1.5"/></svg>',
+    openPanel: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 4.5h5.2a1 1 0 0 1 1 1V11"/><path d="M6.2 9.8L12.5 3.5"/><path d="M9 3.5h3.5V7"/></svg>',
   };
 
   const GROUP_OPTS = [
     ['none', 'groupNone'],
     ['epic', 'groupEpic'],
     ['project', 'groupProject'],
+    ['sprint', 'groupSprint'],
     ['priority', 'groupPriority'],
   ];
 
@@ -42,11 +46,13 @@ const KuiperUI = (() => {
 
   const VIEW_OPTS = [
     ['board', 'viewBoard'],
+    ['list', 'viewList'],
     ['calendar', 'viewCalendar'],
     ['gantt', 'viewGantt'],
   ];
 
   let boardView = 'board';
+  let boardViewBeforeWorkspace = 'board';
 
   function locale() {
     return ctx.locale?.() || 'en';
@@ -167,6 +173,8 @@ const KuiperUI = (() => {
     if (!st) return;
     if (!Array.isArray(st.projectFilters)) st.projectFilters = [];
     if (!Array.isArray(st.epicFilters)) st.epicFilters = [];
+    if (!Array.isArray(st.sprintFilters)) st.sprintFilters = [];
+    if (!Array.isArray(st.issueTypeFilters)) st.issueTypeFilters = [];
   }
 
   function filterSet(arr) {
@@ -200,6 +208,8 @@ const KuiperUI = (() => {
     else if (prefs.filter) st.projectFilters = [prefs.filter];
     if (Array.isArray(prefs.epicFilters)) st.epicFilters = prefs.epicFilters;
     else if (prefs.epicFilter) st.epicFilters = [prefs.epicFilter];
+    if (Array.isArray(prefs.sprintFilters)) st.sprintFilters = prefs.sprintFilters;
+    if (Array.isArray(prefs.issueTypeFilters)) st.issueTypeFilters = prefs.issueTypeFilters;
   }
 
   function filteredEpicsForFilters(st) {
@@ -254,11 +264,36 @@ const KuiperUI = (() => {
   }
 
   function cardIdRowHtml(t) {
+    const icon = issueTypeMarkHtml(t?.issueType || 'task', { size: 'sm' });
     const html = cardIdButtonHtml(t?.id);
-    return html ? `<div class="kuiper-card-id-wrap">${html}</div>` : '';
+    if (!html && !icon) return '';
+    return `<div class="kuiper-card-id-wrap">${icon}${html || ''}</div>`;
   }
 
-  function syncEditorCardId(id) {
+  function refreshBoardCard(task) {
+    if (!task?.id) return;
+    const el = document.querySelector(`.card.kuiper-card[data-id="${CSS.escape(task.id)}"]`);
+    if (!el) return;
+    const h3 = el.querySelector('h3');
+    if (h3) h3.textContent = task.title;
+    el.classList.toggle('has-pri', (task.priority || 0) > 0);
+    const idWrap = el.querySelector('.kuiper-card-id-wrap');
+    const idHtml = cardIdRowHtml(task);
+    if (idWrap && idHtml) {
+      const tmp = document.createElement('div');
+      tmp.innerHTML = idHtml;
+      idWrap.replaceWith(tmp.firstElementChild);
+      bindCardIdButtons(el);
+    }
+    const flag = el.querySelector('.flag');
+    if (flag) {
+      flag.setAttribute('aria-pressed', String(!!task.flag));
+      flag.innerHTML = task.flag ? ICON.starFill : ICON.star;
+    }
+    syncEditorCardId(task.id, task.issueType, task);
+  }
+
+  function syncEditorCardId(id, issueType, draft) {
     const row = document.getElementById('kuiperEditorIdHead');
     if (!row) return;
     if (!id || id === 'new') {
@@ -267,8 +302,29 @@ const KuiperUI = (() => {
       return;
     }
     row.hidden = false;
-    row.innerHTML = cardIdButtonHtml(id);
+    const type = issueType || draft?.issueType || 'task';
+    const icon = issueTypeMarkHtml(type, { size: 'sm' });
+    let html = `<div class="kuiper-editor-id-row"><span class="kuiper-card-id-wrap">${icon}${cardIdButtonHtml(id)}</span>`;
+    const d = draft || (ctx.state?.()?.tasks || []).find(t => t.id === id);
+    if (d && BoardCore.isSubtask(d) && d.parentId) {
+      const parent = (ctx.state?.()?.tasks || []).find(t => t.id === d.parentId);
+      if (parent) {
+        html += `<span class="kuiper-editor-id-sep" aria-hidden="true">›</span>`;
+        html += `<button type="button" class="kuiper-editor-parent-link" data-parent-id="${esc(parent.id)}" title="${esc(parent.title)}">`;
+        html += `${issueTypeMarkHtml(parent.issueType || 'task', { size: 'sm' })}`;
+        html += `<span class="kuiper-editor-parent-id">${esc(parent.id)}</span></button>`;
+      }
+    }
+    html += '</div>';
+    row.innerHTML = html;
     bindCardIdButtons(row);
+    row.querySelectorAll('.kuiper-editor-parent-link').forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        e.preventDefault();
+        ctx.openEditor?.(btn.dataset.parentId, { issueTab: 'subtasks' });
+      });
+    });
   }
 
   function saveUiPrefs(extra = {}) {
@@ -279,6 +335,8 @@ const KuiperUI = (() => {
       ...(ctx.loadKuiperPrefs?.() || {}),
       projectFilters: st.projectFilters || [],
       epicFilters: st.epicFilters || [],
+      sprintFilters: st.sprintFilters || [],
+      issueTypeFilters: st.issueTypeFilters || [],
       groupBy: st.groupBy || 'none',
       sortBy: st.sortBy || 'position',
       boardView,
@@ -313,9 +371,12 @@ const KuiperUI = (() => {
     side.hidden = true;
     side.setAttribute('aria-label', tr('workspace'));
     side.innerHTML = `
-      <header class="panel-head">
+      <header class="panel-head kuiper-side-head">
         <h2 id="kuiperSideTitle">${esc(tr('workspace'))}</h2>
-        <button type="button" class="icon sm" id="kuiperSideClose" title="${esc(tr('close'))}">${ICON.close}</button>
+        <div class="kuiper-side-head-actions">
+          <button type="button" class="pill sm" id="kuiperWsManageBtn" data-i18n="workspaceManage"></button>
+          <button type="button" class="icon sm" id="kuiperSideClose" title="${esc(tr('close'))}">${ICON.close}</button>
+        </div>
       </header>
       <div class="panel-body kuiper-side-body">
         <div class="menu-label" data-i18n="favorites"></div>
@@ -328,6 +389,38 @@ const KuiperUI = (() => {
       </div>`;
     document.body.append(side);
     document.getElementById('kuiperSideClose').onclick = () => setSidebarOpen(false);
+    wireWorkspaceManageBtn();
+  }
+
+  function syncWorkspaceManageBtn() {
+    const manageBtn = document.getElementById('kuiperWsManageBtn');
+    if (!manageBtn) return;
+    manageBtn.setAttribute('aria-pressed', String(isWorkspaceView()));
+    manageBtn.classList.toggle('is-active', isWorkspaceView());
+  }
+
+  function wireWorkspaceManageBtn() {
+    const manageBtn = document.getElementById('kuiperWsManageBtn');
+    if (!manageBtn) return;
+    manageBtn.textContent = tr('workspaceManage');
+    manageBtn.onclick = e => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (isWorkspaceView()) {
+        exitWorkspace();
+        return;
+      }
+      const Admin = typeof KuiperWorkspaceAdmin !== 'undefined'
+        ? KuiperWorkspaceAdmin
+        : (typeof window !== 'undefined' ? window.KuiperWorkspaceAdmin : undefined);
+      if (!Admin?.open) {
+        ctx.toast?.(tr('workspaceAdminScriptMissing'), null, 10000);
+        console.warn('kuiper-workspace-admin.js no cargó — reinicia kanban serve y recarga (Ctrl+Shift+R)');
+        return;
+      }
+      Admin.open();
+    };
+    syncWorkspaceManageBtn();
   }
 
   function ensureToggle() {
@@ -365,10 +458,24 @@ const KuiperUI = (() => {
           <span class="kuiper-filters-badge" hidden></span>
         </button>
         <div class="menu kuiper-drop-menu kuiper-filters-menu" role="listbox" hidden>
-          <div class="menu-label" data-i18n="projects"></div>
-          <div class="kuiper-drop-items" id="kuiperProjectFilterItems"></div>
-          <div class="menu-label kuiper-filters-epic-label" data-i18n="epic"></div>
-          <div class="kuiper-drop-items" id="kuiperEpicFilterItems"></div>
+          <div class="kuiper-filters-cols">
+            <section class="kuiper-filters-col">
+              <div class="menu-label" data-i18n="projects"></div>
+              <div class="kuiper-drop-items" id="kuiperProjectFilterItems"></div>
+            </section>
+            <section class="kuiper-filters-col">
+              <div class="menu-label" data-i18n="filterIssueType"></div>
+              <div class="kuiper-drop-items" id="kuiperIssueTypeFilterItems"></div>
+            </section>
+            <section class="kuiper-filters-col">
+              <div class="menu-label kuiper-filters-epic-label" data-i18n="epic"></div>
+              <div class="kuiper-drop-items" id="kuiperEpicFilterItems"></div>
+            </section>
+            <section class="kuiper-filters-col">
+              <div class="menu-label kuiper-filters-sprint-label" data-i18n="filterSprint"></div>
+              <div class="kuiper-drop-items" id="kuiperSprintFilterItems"></div>
+            </section>
+          </div>
         </div>
       </div>
       <button type="button" class="icon sm kuiper-filters-clear" id="kuiperFiltersClear" hidden title=""></button>
@@ -380,6 +487,8 @@ const KuiperUI = (() => {
       ensureFilterState(st);
       st.projectFilters = [];
       st.epicFilters = [];
+      st.sprintFilters = [];
+      st.issueTypeFilters = [];
     });
   }
 
@@ -390,18 +499,23 @@ const KuiperUI = (() => {
   function initBoardView() {
     const prefs = loadViewPrefs();
     const urlView = new URLSearchParams(location.search).get('view');
-    if (urlView === 'calendar' || urlView === 'gantt' || urlView === 'board') {
+    if (urlView === 'calendar' || urlView === 'gantt' || urlView === 'board' || urlView === 'list') {
       boardView = urlView;
       saveUiPrefs({ boardView });
       const u = new URL(location.href);
       u.searchParams.delete('view');
       history.replaceState(null, '', `${u.pathname}${u.search}${u.hash}`);
-    } else if (prefs.boardView === 'calendar' || prefs.boardView === 'gantt' || prefs.boardView === 'board') {
+    } else if (prefs.boardView === 'calendar' || prefs.boardView === 'gantt' || prefs.boardView === 'board' || prefs.boardView === 'list') {
       boardView = prefs.boardView;
+      boardViewBeforeWorkspace = boardView;
     } else {
       boardView = 'board';
     }
     document.documentElement.dataset.kuiperView = boardView;
+  }
+
+  function isWorkspaceView() {
+    return boardView === 'workspace';
   }
 
   function getBoardView() {
@@ -411,9 +525,38 @@ const KuiperUI = (() => {
   function setBoardView(next) {
     if (!VIEW_OPTS.some(([v]) => v === next)) return;
     boardView = next;
+    boardViewBeforeWorkspace = next;
     document.documentElement.dataset.kuiperView = boardView;
     saveUiPrefs({ boardView });
     renderViewTabs();
+    syncWorkspaceManageBtn();
+    ctx.renderBoard?.();
+  }
+
+  function enterWorkspace(nextTab) {
+    const org = currentOrgSlug() || new URLSearchParams(location.search).get('org');
+    if (!org) {
+      ctx.toast?.(tr('workspaceAdminNeedsOrg'));
+      return;
+    }
+    if (boardView !== 'workspace') boardViewBeforeWorkspace = boardView;
+    boardView = 'workspace';
+    document.documentElement.dataset.kuiperView = 'workspace';
+    renderViewTabs();
+    syncWorkspaceManageBtn();
+    if (typeof KuiperWorkspaceAdmin !== 'undefined') {
+      KuiperWorkspaceAdmin.prepare?.(nextTab || 'boards');
+    }
+    ctx.renderBoard?.();
+  }
+
+  function exitWorkspace() {
+    if (boardView !== 'workspace') return;
+    boardView = boardViewBeforeWorkspace || 'board';
+    document.documentElement.dataset.kuiperView = boardView;
+    saveUiPrefs({ boardView });
+    renderViewTabs();
+    syncWorkspaceManageBtn();
     ctx.renderBoard?.();
   }
 
@@ -428,7 +571,7 @@ const KuiperUI = (() => {
     const tabs = document.querySelector('.kuiper-view-tabs');
     if (!tabs) return;
     tabs.querySelectorAll('.kuiper-view-tab').forEach(btn => {
-      const active = btn.dataset.view === boardView;
+      const active = !isWorkspaceView() && btn.dataset.view === boardView;
       btn.setAttribute('aria-selected', String(active));
       btn.setAttribute('aria-pressed', String(active));
       btn.classList.toggle('is-active', active);
@@ -497,6 +640,16 @@ const KuiperUI = (() => {
     positionDropMenu(pin.menu, pin.btn);
   }
 
+  function toggleSprintFilter(sprintId) {
+    if (!sprintId) return;
+    applyFilterChange(s => {
+      ensureFilterState(s);
+      const sel = filterSet(s.sprintFilters);
+      if (sel.size === 1 && sel.has(sprintId)) s.sprintFilters = [];
+      else s.sprintFilters = [sprintId];
+    });
+  }
+
   function applyFilterChange(mutate) {
     const st = ctx.state?.();
     if (!st) return;
@@ -535,16 +688,33 @@ const KuiperUI = (() => {
 
   function positionDropMenu(menu, btn) {
     const r = btn.getBoundingClientRect();
-    const width = Math.min(280, window.innerWidth - 16);
-    let left = Math.max(8, r.left);
-    if (left + width > window.innerWidth - 8) left = window.innerWidth - 8 - width;
+    const margin = 8;
+    const maxViewport = window.innerWidth - margin * 2;
     menu.style.position = 'fixed';
     menu.style.top = `${r.bottom + 6}px`;
-    menu.style.left = `${left}px`;
     menu.style.right = 'auto';
     menu.style.bottom = 'auto';
-    menu.style.width = `${width}px`;
     menu.style.zIndex = '120';
+
+    const isFilters = menu.classList.contains('kuiper-filters-menu');
+    if (isFilters) {
+      menu.style.width = 'auto';
+      menu.style.minWidth = '';
+      menu.style.maxWidth = `${Math.min(1280, maxViewport)}px`;
+      const menuWidth = Math.min(menu.offsetWidth || Math.min(640, maxViewport), maxViewport);
+      let left = Math.max(margin, r.left);
+      if (left + menuWidth > window.innerWidth - margin) {
+        left = Math.max(margin, window.innerWidth - margin - menuWidth);
+      }
+      menu.style.left = `${left}px`;
+      return;
+    }
+
+    const width = Math.min(280, maxViewport);
+    let left = Math.max(margin, r.left);
+    if (left + width > window.innerWidth - margin) left = window.innerWidth - margin - width;
+    menu.style.left = `${left}px`;
+    menu.style.width = `${width}px`;
   }
 
   function dropBtnOf(ctrl) {
@@ -570,14 +740,57 @@ const KuiperUI = (() => {
     else openDropMenu(ctrl);
   }
 
+  let listPickCtrl = null;
+
+  function ensureListPickCtrl() {
+    bindDropdowns();
+    if (listPickCtrl && !listPickCtrl.querySelector('.kuiper-drop-label')) {
+      listPickCtrl.remove();
+      listPickCtrl = null;
+    }
+    if (listPickCtrl) return listPickCtrl;
+    const wrap = document.createElement('div');
+    wrap.id = 'kuiperListPickCtrl';
+    wrap.className = 'kuiper-ctrl kuiper-list-pick-ctrl';
+    wrap.setAttribute('aria-hidden', 'true');
+    wrap.innerHTML = `
+      <button type="button" class="kuiper-select-btn kuiper-list-pick-anchor" aria-haspopup="listbox" aria-expanded="false" tabindex="-1">
+        <span class="kuiper-drop-label"></span>
+      </button>
+      <div class="menu kuiper-drop-menu" role="listbox" hidden>
+        <div class="kuiper-drop-items"></div>
+      </div>`;
+    document.body.append(wrap);
+    wireCtrl(wrap);
+    listPickCtrl = wrap;
+    return wrap;
+  }
+
+  /** Menú desplegable Kuiper anclado a un elemento (p. ej. celda de lista) — se abre al instante. */
+  function openAnchoredPickMenu(anchor, options, current, onPick, { optionHtml } = {}) {
+    if (!anchor || !options?.length) return;
+    closeEditorMenu();
+    const ctrl = ensureListPickCtrl();
+    const r = anchor.getBoundingClientRect();
+    ctrl.style.position = 'fixed';
+    ctrl.style.left = `${r.left}px`;
+    ctrl.style.top = `${r.top}px`;
+    ctrl.style.width = `${Math.max(r.width, 8)}px`;
+    ctrl.style.height = `${Math.max(r.height, 8)}px`;
+    ctrl.style.opacity = '0';
+    ctrl.style.pointerEvents = 'none';
+    populateDropCtrl(ctrl, options, current, onPick, { optionHtml });
+    openDropMenu(ctrl);
+  }
+
   function bindDropdowns() {
     if (dropBound) return;
     dropBound = true;
     document.addEventListener('pointerdown', e => {
-      if (e.target.closest('.kuiper-ctrl, .kuiper-drop-menu, .kuiper-filters-wrap')) return;
+      if (e.target.closest('.kuiper-ctrl, .kuiper-drop-menu, .kuiper-filters-wrap, #kuiperPickerLayer, .kuiper-picker-scrim, .kuiper-picker-pop')) return;
       closeDropMenus();
     });
-    window.addEventListener('resize', closeDropMenus);
+    window.addEventListener('resize', () => { closeDropMenus(); closeEditorMenu(); });
   }
 
   function updateDropdown(ctrlId, options, current, onPick, { optionHtml } = {}) {
@@ -628,18 +841,68 @@ const KuiperUI = (() => {
     }
   }
 
+  function ensureFiltersMenuLayout() {
+    const menu = document.querySelector('#kuiperFiltersCtrl .kuiper-filters-menu');
+    if (!menu) return;
+
+    const pick = key => menu.querySelector(`.menu-label[data-i18n="${key}"]`);
+    const projLabel = pick('projects');
+    const projItems = document.getElementById('kuiperProjectFilterItems');
+    let typeLabel = pick('filterIssueType');
+    let typeItems = document.getElementById('kuiperIssueTypeFilterItems');
+    const epicLabel = menu.querySelector('.kuiper-filters-epic-label');
+    const epicItems = document.getElementById('kuiperEpicFilterItems');
+    const sprintLabel = menu.querySelector('.kuiper-filters-sprint-label');
+    const sprintItems = document.getElementById('kuiperSprintFilterItems');
+
+    if (!typeItems && epicLabel) {
+      typeLabel = document.createElement('div');
+      typeLabel.className = 'menu-label';
+      typeLabel.dataset.i18n = 'filterIssueType';
+      typeLabel.textContent = tr('filterIssueType');
+      typeItems = document.createElement('div');
+      typeItems.className = 'kuiper-drop-items';
+      typeItems.id = 'kuiperIssueTypeFilterItems';
+      epicLabel.before(typeItems);
+      epicLabel.before(typeLabel);
+    }
+
+    if (!menu.querySelector('.kuiper-filters-cols')) {
+      const mkCol = (...nodes) => {
+        const col = document.createElement('section');
+        col.className = 'kuiper-filters-col';
+        nodes.filter(Boolean).forEach(n => col.append(n));
+        return col;
+      };
+      const cols = document.createElement('div');
+      cols.className = 'kuiper-filters-cols';
+      cols.append(
+        mkCol(projLabel, projItems),
+        mkCol(typeLabel, typeItems),
+        mkCol(epicLabel, epicItems),
+        mkCol(sprintLabel, sprintItems),
+      );
+      menu.replaceChildren(cols);
+    }
+  }
+
   function renderFiltersMenu() {
     const st = ctx.state?.();
     if (!st) return;
     ensureFilterState(st);
+    ensureFiltersMenuLayout();
     const projItems = document.getElementById('kuiperProjectFilterItems');
     const epicItems = document.getElementById('kuiperEpicFilterItems');
+    const sprintItems = document.getElementById('kuiperSprintFilterItems');
+    const typeItems = document.getElementById('kuiperIssueTypeFilterItems');
     const ctrl = document.getElementById('kuiperFiltersCtrl');
-    if (!projItems || !epicItems || !ctrl) return;
+    if (!projItems || !epicItems || !sprintItems || !typeItems || !ctrl) return;
     wireCtrl(ctrl);
 
     const projSel = filterSet(st.projectFilters);
     const epicSel = filterSet(st.epicFilters);
+    const sprintSel = filterSet(st.sprintFilters);
+    const typeSel = filterSet(st.issueTypeFilters);
     const favProjects = getFavoriteProjects();
 
     const mkBtn = (html, active, onClick) => {
@@ -657,14 +920,14 @@ const KuiperUI = (() => {
       return b;
     };
 
-    const count = projSel.size + epicSel.size;
+    const count = projSel.size + epicSel.size + sprintSel.size + typeSel.size;
     const badge = ctrl.querySelector('.kuiper-filters-badge');
     if (badge) {
       badge.hidden = !count;
       badge.textContent = String(count);
     }
     const btnLabel = ctrl.querySelector('.kuiper-drop-label');
-    if (btnLabel) btnLabel.textContent = count ? `${tr('filters')} (${count})` : tr('filters');
+    if (btnLabel) btnLabel.textContent = tr('filters');
     const clearBtn = document.getElementById('kuiperFiltersClear');
     if (clearBtn) {
       clearBtn.hidden = !count;
@@ -702,6 +965,19 @@ const KuiperUI = (() => {
       }));
     }
 
+    typeItems.innerHTML = '';
+    typeItems.append(mkBtn(`<span class="kuiper-drop-opt">${esc(tr('all'))}</span>`, typeSel.size === 0, () => {
+      applyFilterChange(s => { s.issueTypeFilters = []; });
+    }));
+    for (const typeId of BoardCore.ISSUE_TYPES) {
+      const html = `<span class="kuiper-drop-opt kuiper-opt-issue">${issueTypeMarkHtml(typeId, { size: 'sm' })}<span>${esc(issueTypeLabel(typeId))}</span></span>`;
+      typeItems.append(mkBtn(html, typeSel.has(typeId), () => {
+        applyFilterChange(s => {
+          s.issueTypeFilters = toggleFilterId(s.issueTypeFilters, typeId);
+        });
+      }));
+    }
+
     epicItems.innerHTML = '';
     const epics = filteredEpicsForFilters(st);
     const epicLabel = ctrl.querySelector('.kuiper-filters-epic-label');
@@ -725,6 +1001,35 @@ const KuiperUI = (() => {
         epicItems.append(mkBtn(epicMarkHtml(e, { label: e.title }), epicSel.has(e.id), () => {
           applyFilterChange(s => {
             s.epicFilters = toggleFilterId(s.epicFilters, e.id);
+          });
+        }));
+      }
+    }
+
+    sprintItems.innerHTML = '';
+    const sprints = st.sprints || [];
+    const sprintLabel = ctrl.querySelector('.kuiper-filters-sprint-label');
+    if (sprintLabel) sprintLabel.hidden = !sprints.length;
+    if (!sprints.length) {
+      sprintItems.append(mkBtn(
+        `<span class="kuiper-drop-opt kuiper-hint-inline">${esc(tr('sprintNone'))}</span>`,
+        false,
+        () => {},
+      ));
+    } else {
+      sprintItems.append(mkBtn(`<span class="kuiper-drop-opt">${esc(tr('all'))}</span>`, sprintSel.size === 0, () => {
+        applyFilterChange(s => { s.sprintFilters = []; });
+      }));
+      sprintItems.append(mkBtn(`<span class="kuiper-drop-opt">${esc(tr('sprintNone'))}</span>`, sprintSel.has('__none__'), () => {
+        applyFilterChange(s => {
+          s.sprintFilters = toggleFilterId(s.sprintFilters, '__none__');
+        });
+      }));
+      for (const s of BoardCore.sortSprintsForUi(sprints)) {
+        const label = `${s.name} · ${s.startDate || s.start_date || ''}`;
+        sprintItems.append(mkBtn(`<span class="kuiper-drop-opt">${esc(label)}</span>`, sprintSel.has(s.id), () => {
+          applyFilterChange(s => {
+            s.sprintFilters = toggleFilterId(s.sprintFilters, s.id);
           });
         }));
       }
@@ -771,9 +1076,20 @@ const KuiperUI = (() => {
     if (!st) return [];
     return (st.tasks || []).filter(t => {
       if (t.archivedAt) return false;
+      if (!BoardCore.isBoardTopLevelTask(t)) return false;
       if (!matchesVisible(t)) return false;
       if (!includeUnscheduled && !t.scheduleStartDate && !t.scheduleEndDate) return false;
       return true;
+    });
+  }
+
+  function subtasksOf(parentId) {
+    const st = ctx.state?.();
+    if (!st || !parentId) return [];
+    return (st.tasks || []).filter(t => {
+      if (t.archivedAt) return false;
+      if (t.parentId !== parentId) return false;
+      return BoardCore.normalizeIssueType(t.issueType) === 'subtask';
     });
   }
 
@@ -835,6 +1151,10 @@ const KuiperUI = (() => {
     side.classList.toggle('open', open);
     side.setAttribute('aria-hidden', String(!open));
     document.documentElement.dataset.kuiperSide = open ? 'open' : '';
+    document.documentElement.style.setProperty(
+      '--kuiper-side-offset',
+      open ? 'var(--kuiper-side-w)' : '0px',
+    );
     ctx.syncScrim?.();
     saveUiPrefs({ sidebarOpen: open });
     const toggle = document.getElementById('kuiperSideToggle');
@@ -1027,6 +1347,7 @@ const KuiperUI = (() => {
     });
     const title = document.getElementById('kuiperSideTitle');
     if (title) title.textContent = tr('workspace');
+    wireWorkspaceManageBtn();
     renderFavorites();
     renderBoardTree();
     renderProjectList();
@@ -1138,6 +1459,16 @@ const KuiperUI = (() => {
       const epicId = t.epicId || '__none__';
       if (!epicSel.has(epicId)) return false;
     }
+    const sprintSel = filterSet(st.sprintFilters);
+    if (sprintSel.size) {
+      const sprintId = t.sprintId || '__none__';
+      if (!sprintSel.has(sprintId)) return false;
+    }
+    const typeSel = filterSet(st.issueTypeFilters);
+    if (typeSel.size) {
+      const type = BoardCore.normalizeIssueType(t.issueType);
+      if (!typeSel.has(type)) return false;
+    }
     return true;
   }
 
@@ -1147,7 +1478,7 @@ const KuiperUI = (() => {
     if (ctx.isEditorOpen?.(id)) return true;
     ctx.openEditor?.(id);
     requestAnimationFrame(() => {
-      const el = document.querySelector(`.card[data-id="${id}"]`);
+      const el = document.querySelector(`.card[data-id="${id}"], .kuiper-list-row[data-id="${id}"]`);
       el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     });
     return true;
@@ -1178,6 +1509,7 @@ const KuiperUI = (() => {
     const mode = st?.groupBy || 'none';
     if (mode === 'epic') return task.epicId || '__none__';
     if (mode === 'project') return task.projectId || '__none__';
+    if (mode === 'sprint') return task.sprintId || '__none__';
     if (mode === 'priority') return String(task.priority || 0);
     return null;
   }
@@ -1193,6 +1525,11 @@ const KuiperUI = (() => {
       if (key === '__none__') return tr('none');
       const p = (st.projects || []).find(x => x.id === key);
       return p?.name || tr('none');
+    }
+    if (mode === 'sprint') {
+      if (key === '__none__') return tr('sprintNone');
+      const s = (st.sprints || []).find(x => x.id === key);
+      return s?.name || tr('sprintNone');
     }
     if (mode === 'priority') return priorityLabel(Number(key));
     return '';
@@ -1246,6 +1583,11 @@ const KuiperUI = (() => {
       const epic = epicOf(key);
       return { key, label: epic?.title || tr('noEpic'), color: epicColor(epic), kind: 'epic' };
     }
+    if (mode === 'sprint') {
+      if (key === '__none__') return { key, label: tr('sprintNone'), color: null, kind: 'none' };
+      const sprint = (st.sprints || []).find(x => x.id === key);
+      return { key, label: sprint?.name || tr('sprintNone'), color: sprint?.color || null, kind: 'sprint' };
+    }
     if (mode === 'priority') {
       const n = Number(key);
       return { key, label: priorityLabel(n), color: null, kind: 'priority', priority: n };
@@ -1265,6 +1607,9 @@ const KuiperUI = (() => {
     } else if (mode === 'epic') {
       for (const e of st.epics || []) if (keys.has(e.id)) ordered.push(e.id);
       if (keys.has('__none__')) ordered.push('__none__');
+    } else if (mode === 'sprint') {
+      for (const s of BoardCore.sortSprintsForUi(st.sprints || [])) if (keys.has(s.id)) ordered.push(s.id);
+      if (keys.has('__none__')) ordered.push('__none__');
     } else if (mode === 'priority') {
       ordered = ['4', '3', '2', '1', '0'].filter(k => keys.has(k));
     }
@@ -1283,6 +1628,8 @@ const KuiperUI = (() => {
       mark = '<span class="kuiper-sep-mark project" aria-hidden="true"><span class="dot"></span></span>';
     } else if (lane.kind === 'epic') {
       mark = '<span class="kuiper-sep-mark epic" aria-hidden="true"><span class="tri"></span></span>';
+    } else if (lane.kind === 'sprint' && lane.color) {
+      mark = '<span class="kuiper-sep-mark project" aria-hidden="true"><span class="dot"></span></span>';
     } else if (lane.kind === 'priority' && lane.priority > 0) {
       mark = `<span class="kuiper-sep-mark pri">${priorityMarkHtml(lane.priority)}</span>`;
     }
@@ -1312,10 +1659,21 @@ const KuiperUI = (() => {
       const epic = epicId ? epicOf(epicId) : null;
       return { epicId, projectId: epic?.projectId || null };
     }
+    if (mode === 'sprint') {
+      return { sprintId: laneKey === '__none__' ? null : laneKey };
+    }
     if (mode === 'priority') {
       return { priority: Number(laneKey) || 0 };
     }
     return {};
+  }
+
+  function buildSubtaskProgress(t) {
+    const list = subtasksOf(t.id);
+    if (!list.length) return '';
+    const cols = ctx.state?.()?.columns || [];
+    const done = list.filter(s => BoardCore.subtaskIsDone(s, cols)).length;
+    return `<div class="kuiper-card-subtasks" title="${esc(tr('subtasks'))}">${done}/${list.length}</div>`;
   }
 
   function buildCardProgress(t) {
@@ -1362,6 +1720,7 @@ const KuiperUI = (() => {
   function buildCardMeta(t, project) {
     const epic = t.epicId ? epicOf(t.epicId) : null;
     const progressHtml = buildCardProgress(t);
+    const subtasksHtml = buildSubtaskProgress(t);
     const linksHtml = buildCardLinks(t);
     const scopeRows = [];
     if (project) {
@@ -1381,8 +1740,8 @@ const KuiperUI = (() => {
     const footHtml = (scopeHtml || labelsHtml)
       ? `<div class="kuiper-card-foot">${scopeHtml}${labelsHtml}</div>`
       : '';
-    if (!progressHtml && !linksHtml && !footHtml) return '';
-    return `${progressHtml}${footHtml}${linksHtml}`;
+    if (!progressHtml && !subtasksHtml && !linksHtml && !footHtml) return '';
+    return `${progressHtml}${subtasksHtml}${footHtml}${linksHtml}`;
   }
 
   function decorateCardMeta(t, metaHtml) {
@@ -1393,6 +1752,82 @@ const KuiperUI = (() => {
     const st = ctx.state?.();
     if (!st) return [];
     return (st.epics || []).filter(e => !projectId || e.projectId === projectId);
+  }
+
+  const ISSUE_TYPE_I18N = {
+    initiative: 'issueTypeInitiative',
+    epic: 'issueTypeEpic',
+    story: 'issueTypeStory',
+    task: 'issueTypeTask',
+    bug: 'issueTypeBug',
+    spike: 'issueTypeSpike',
+    subtask: 'issueTypeSubtask',
+  };
+
+  const ISSUE_TYPE_COLORS = {
+    initiative: '#FF8B00',
+    epic: '#904EE2',
+    story: '#36B37E',
+    task: '#4BADE8',
+    bug: '#E5493A',
+    spike: '#42526E',
+    subtask: '#7A869A',
+  };
+
+  function issueTypeSvg(type) {
+    const t = BoardCore.normalizeIssueType(type);
+    switch (t) {
+      case 'initiative':
+        return '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.5" fill="none" stroke="currentColor" stroke-width="1.25"/><circle cx="8" cy="8" r="2.5" fill="none" stroke="currentColor" stroke-width="1.25"/><circle cx="8" cy="8" r=".9" fill="currentColor"/></svg>';
+      case 'epic':
+        return '<svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M9.35 1.2 3.6 9.1h3.15L6.1 14.8l6.3-8.35H9.2L9.35 1.2z"/></svg>';
+      case 'story':
+        return '<svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M2.8 2.2v11.1l2.6-1.55L7.9 13.6V2.2L5.4 3.75 2.8 2.2zm5.2.8v10.3l2.6-1.55L13.2 13.6V3l-2.5 1.55L8 3z"/></svg>';
+      case 'task':
+        return '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.4" y="2.4" width="11.2" height="11.2" rx="2" fill="none" stroke="currentColor" stroke-width="1.35"/><path fill="none" stroke="currentColor" stroke-width="1.45" stroke-linecap="round" stroke-linejoin="round" d="M5 8.1 6.9 10 11 5.6"/></svg>';
+      case 'bug':
+        return '<svg viewBox="0 0 16 16" aria-hidden="true"><ellipse cx="8" cy="9.2" rx="4.2" ry="3.4" fill="currentColor"/><circle cx="8" cy="5.4" r="2.1" fill="currentColor"/><path fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" d="M4.2 7.2 2.5 6M4.2 10.8 2.5 12M11.8 7.2l1.7-1.2M11.8 10.8l1.7 1.2M6 4.2 5.2 2.5M10 4.2l.8-1.7"/></svg>';
+      case 'spike':
+        return '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="6.8" cy="6.8" r="3.6" fill="none" stroke="currentColor" stroke-width="1.45"/><path fill="none" stroke="currentColor" stroke-width="1.45" stroke-linecap="round" d="M9.4 9.4 12.8 12.8"/></svg>';
+      case 'subtask':
+      default:
+        return '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2.5" width="4.8" height="4.8" rx="1" fill="currentColor"/><rect x="9.2" y="8.7" width="4.8" height="4.8" rx="1" fill="currentColor" opacity=".82"/><path fill="none" stroke="currentColor" stroke-width="1.15" d="M6.8 4.9h1.4v4.1h2.2"/></svg>';
+    }
+  }
+
+  function issueTypeLabel(type) {
+    const t = BoardCore.normalizeIssueType(type);
+    const key = ISSUE_TYPE_I18N[t] || 'issueTypeTask';
+    return tr(key);
+  }
+
+  function issueTypeMarkHtml(type, { size = 'md', label = false } = {}) {
+    const t = BoardCore.normalizeIssueType(type);
+    const color = ISSUE_TYPE_COLORS[t] || ISSUE_TYPE_COLORS.task;
+    const title = esc(issueTypeLabel(t));
+    const sz = size === 'sm' ? ' kuiper-issue-type-sm' : '';
+    const inner = `<span class="kuiper-issue-type${sz} it-${t}" style="--issue-c:${esc(color)}" title="${title}" aria-label="${title}">${issueTypeSvg(t)}</span>`;
+    if (!label) return inner;
+    return `<span class="kuiper-issue-type-lbl">${inner}<span>${title}</span></span>`;
+  }
+
+  function parentsForProject(projectId, editingId) {
+    const st = ctx.state?.();
+    if (!st || !projectId) return [];
+    return (st.tasks || []).filter(t => {
+      if (t.id === editingId) return false;
+      if (t.projectId !== projectId) return false;
+      const type = BoardCore.normalizeIssueType(t.issueType);
+      return type !== 'subtask';
+    });
+  }
+
+  function sprintsForProject(projectId) {
+    const st = ctx.state?.();
+    if (!st) return [];
+    const list = st.sprints || [];
+    if (!projectId) return list;
+    return list.filter(s => (s.projectIds || []).includes(projectId));
   }
 
   let editorLayoutReady = false;
@@ -1589,8 +2024,209 @@ const KuiperUI = (() => {
     </div>`;
   }
 
-  function updateEditorSelect(ctrlId, options, current, onPick, { optionHtml } = {}) {
+  function setEditorFieldReadonly(ctrlId, readonly) {
+    const wrap = document.getElementById(ctrlId)?.closest('.kuiper-ed-field');
     const ctrl = document.getElementById(ctrlId);
+    if (wrap) wrap.classList.toggle('kuiper-ed-readonly', readonly);
+    if (ctrl) {
+      const btn = ctrl.querySelector('.kuiper-select-btn');
+      if (btn) btn.disabled = !!readonly;
+    }
+  }
+
+  async function setSubtaskStage(subtaskId, stageId) {
+    if (!stageId || typeof KuiperStore === 'undefined') return;
+    const st = ctx.state?.();
+    const cols = st?.columns || [];
+    const terminal = BoardCore.terminalStageId(cols);
+    const t = st?.tasks?.find(x => x.id === subtaskId);
+    if (t) {
+      const wasDone = BoardCore.subtaskIsDone(t, cols);
+      if (stageId === terminal) {
+        if (!wasDone) subtaskStageBeforeDone.set(subtaskId, t.columnId);
+      } else {
+        subtaskStageBeforeDone.set(subtaskId, stageId);
+      }
+    }
+    try {
+      await KuiperStore.patchCard(subtaskId, { stage_id: stageId });
+      if (t) t.columnId = stageId;
+      ctx.renderBoard?.();
+      if (editorEditingId && editorEditingId !== 'new') renderSubtasksPanel(editorEditingId);
+      if (typeof KuiperIssuePanel !== 'undefined') KuiperIssuePanel.refreshSubtasksTab?.();
+    } catch (err) {
+      console.warn('subtask stage change failed', err);
+      ctx.toast?.(tr('scheduleSaveFailed'));
+    }
+  }
+
+  async function toggleSubtaskDone(subtaskId, done) {
+    const st = ctx.state?.();
+    const cols = st?.columns || [];
+    const first = BoardCore.firstStageId(cols);
+    const terminal = BoardCore.terminalStageId(cols);
+    const t = st?.tasks?.find(x => x.id === subtaskId);
+    if (!t || !terminal || typeof KuiperStore === 'undefined') return;
+
+    let stageId;
+    if (done) {
+      if (!BoardCore.subtaskIsDone(t, cols)) {
+        subtaskStageBeforeDone.set(subtaskId, t.columnId || first);
+      }
+      stageId = terminal;
+    } else {
+      stageId = subtaskStageBeforeDone.get(subtaskId);
+      if (!stageId || stageId === terminal) stageId = first;
+      subtaskStageBeforeDone.delete(subtaskId);
+    }
+
+    try {
+      await KuiperStore.patchCard(subtaskId, { stage_id: stageId });
+      t.columnId = stageId;
+      ctx.renderBoard?.();
+      if (editorEditingId && editorEditingId !== 'new') renderSubtasksPanel(editorEditingId);
+      if (typeof KuiperIssuePanel !== 'undefined') KuiperIssuePanel.refreshSubtasksTab?.();
+    } catch (err) {
+      console.warn('subtask stage toggle failed', err);
+      ctx.toast?.(tr('scheduleSaveFailed'));
+    }
+  }
+
+  async function saveSubtaskTitle(subtaskId, title, parentId) {
+    const trimmed = String(title || '').trim();
+    const st = ctx.state?.();
+    const t = st?.tasks?.find(x => x.id === subtaskId);
+    if (!t || typeof KuiperStore === 'undefined') return trimmed;
+    if (!trimmed) return t.title;
+    if (t.title === trimmed) return trimmed;
+    try {
+      await KuiperStore.patchCard(subtaskId, { title: trimmed });
+      t.title = trimmed;
+      ctx.renderBoard?.();
+      if (ctx.isEditorOpen?.(subtaskId)) {
+        const fTitle = document.getElementById('f-title');
+        if (fTitle && document.activeElement !== fTitle) fTitle.value = trimmed;
+      }
+      return trimmed;
+    } catch (err) {
+      console.warn('subtask title save failed', err);
+      ctx.toast?.(tr('scheduleSaveFailed'));
+      return t.title;
+    }
+  }
+
+  async function addSubtaskFromEditor(parentId, title, inputEl) {
+    const trimmed = String(title || '').trim();
+    if (!trimmed || typeof KuiperStore === 'undefined') return;
+    const st = ctx.state?.();
+    const parent = st?.tasks?.find(t => t.id === parentId);
+    if (!parent) return;
+    const columnId = BoardCore.firstStageId(st?.columns) || parent.columnId;
+    try {
+      const body = buildCreateBody({
+        title: trimmed,
+        issueType: 'subtask',
+        parentId,
+        projectId: parent.projectId,
+        epicId: parent.epicId,
+        sprintId: parent.sprintId,
+        columnId,
+      });
+      await KuiperStore.createCard(body);
+      await ctx.refreshKuiperBoard?.();
+      if (inputEl) inputEl.value = '';
+      renderSubtasksPanel(parentId);
+      if (typeof KuiperIssuePanel !== 'undefined') KuiperIssuePanel.refreshSubtasksTab?.();
+      ctx.renderBoard?.();
+    } catch (err) {
+      console.warn('subtask create failed', err);
+      ctx.toast?.(tr('scheduleSaveFailed'));
+    }
+  }
+
+  function renderSubtasksPanel(parentId) {
+    const block = document.getElementById('kuiperSubtasksPanel');
+    if (!block || !parentId || parentId === 'new') return;
+    const list = subtasksOf(parentId);
+    const cols = BoardCore.sortedStages(ctx.state?.()?.columns || []);
+    const done = list.filter(t => BoardCore.subtaskIsDone(t, cols)).length;
+    if (!list.length) {
+      block.innerHTML = `<p class="kuiper-panel-empty">${esc(tr('noSubtasks'))}</p>`;
+      return;
+    }
+    const stageOpts = cols.map(c => ({ value: c.id, label: stageLabel(c.name) }));
+    const stageLabelMax = stageOpts.reduce((n, o) => Math.max(n, String(o.label).length), 4);
+    const stageColW = Math.min(124, Math.max(88, stageLabelMax * 7 + 26));
+    const rows = list.map(t => {
+      const isDone = BoardCore.subtaskIsDone(t, cols);
+      const ctrlId = `kuiperSubtaskSt_${String(t.id).replace(/[^a-zA-Z0-9]/g, '_')}`;
+      return `<li class="kuiper-subtask-row" data-id="${esc(t.id)}" data-stage-ctrl="${esc(ctrlId)}">
+        <button type="button" class="kuiper-subtask-done${isDone ? ' is-done' : ''}" aria-pressed="${isDone}" title="${esc(tr('subtaskMarkDone'))}" aria-label="${esc(tr('subtaskMarkDone'))}"></button>
+        <div class="kuiper-subtask-track">
+          <input type="text" class="kuiper-subtask-title-input" value="${esc(t.title)}" spellcheck="true" aria-label="${esc(tr('issueTypeSubtask'))}">
+          <div class="kuiper-subtask-stage-wrap">
+            <div class="kuiper-ctrl kuiper-subtask-stage-ctrl" id="${esc(ctrlId)}">
+              <button type="button" class="kuiper-select-btn kuiper-select-btn-compact" aria-haspopup="listbox" aria-expanded="false" aria-label="${esc(tr('stage'))}">
+                <span class="kuiper-drop-label"></span>
+                <span class="kuiper-select-chev">${ICON.chev}</span>
+              </button>
+              <div class="menu kuiper-drop-menu" role="listbox" hidden>
+                <div class="kuiper-drop-items"></div>
+              </div>
+            </div>
+          </div>
+          <button type="button" class="kuiper-subtask-open" title="${esc(tr('subtaskOpen'))}" aria-label="${esc(tr('subtaskOpen'))}">
+            <span class="kuiper-subtask-open-mark">${issueTypeMarkHtml('subtask', { size: 'sm' })}</span>
+            <span class="kuiper-subtask-open-id">${esc(t.id)}</span>
+            <span class="kuiper-subtask-open-ico" aria-hidden="true">${ICON.openPanel}</span>
+          </button>
+        </div>
+      </li>`;
+    }).join('');
+    block.innerHTML = `
+      <div class="kuiper-subtasks-head"><span class="kuiper-subtasks-progress">${done}/${list.length}</span></div>
+      <ul class="kuiper-subtasks-list" style="--kuiper-subtask-stage-w:${stageColW}px">${rows}</ul>`;
+    block.querySelectorAll('.kuiper-subtask-row').forEach(row => {
+      const id = row.dataset.id;
+      const ctrl = document.getElementById(row.dataset.stageCtrl);
+      const task = list.find(x => x.id === id);
+      if (ctrl && task) {
+        populateDropCtrl(ctrl, stageOpts, task.columnId || cols[0]?.id, value => {
+          void setSubtaskStage(id, value);
+        });
+      }
+      row.querySelector('.kuiper-subtask-done')?.addEventListener('click', () => {
+        const btn = row.querySelector('.kuiper-subtask-done');
+        const next = !btn?.classList.contains('is-done');
+        void toggleSubtaskDone(id, next);
+      });
+      const titleInput = row.querySelector('.kuiper-subtask-title-input');
+      if (titleInput && task) {
+        const savedTitle = () => task.title;
+        titleInput.addEventListener('keydown', e => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            titleInput.blur();
+          }
+          if (e.key === 'Escape') {
+            e.preventDefault();
+            titleInput.value = savedTitle();
+            titleInput.blur();
+          }
+        });
+        titleInput.addEventListener('blur', () => {
+          void saveSubtaskTitle(id, titleInput.value, parentId).then(next => {
+            titleInput.value = next;
+          });
+        });
+      }
+      row.querySelector('.kuiper-subtask-open')?.addEventListener('click', () => {
+        ctx.openEditor?.(id);
+      });
+    });
+  }
+
+  function populateDropCtrl(ctrl, options, current, onPick, { optionHtml } = {}) {
     if (!ctrl) return;
     wireCtrl(ctrl);
     const menu = menuOf(ctrl);
@@ -1613,6 +2249,7 @@ const KuiperUI = (() => {
       b.type = 'button';
       b.setAttribute('role', 'option');
       b.setAttribute('aria-selected', String(active));
+      b.dataset.value = value == null ? '__null__' : String(value);
       b.innerHTML = `${html}<span class="tick">✓</span>`;
       b.onclick = e => {
         e.stopPropagation();
@@ -1636,10 +2273,32 @@ const KuiperUI = (() => {
     }
   }
 
+  function updateEditorSelect(ctrlId, options, current, onPick, { optionHtml } = {}) {
+    populateDropCtrl(document.getElementById(ctrlId), options, current, onPick, { optionHtml });
+  }
+
+  function positionAnchoredMenu(menu, btn, { width = 188, gap = 6 } = {}) {
+    const r = btn.getBoundingClientRect();
+    const margin = 8;
+    const w = Math.min(width, window.innerWidth - margin * 2);
+    menu.style.position = 'fixed';
+    menu.style.top = `${r.bottom + gap}px`;
+    menu.style.bottom = 'auto';
+    menu.style.width = `${w}px`;
+    let left = r.right - w;
+    left = Math.max(margin, Math.min(left, window.innerWidth - margin - w));
+    menu.style.left = `${left}px`;
+    menu.style.right = 'auto';
+    menu.style.zIndex = '130';
+  }
+
   function closeEditorMenu() {
     const panel = document.getElementById('f-editor-menu-panel');
     const btn = document.getElementById('f-editor-menu');
-    if (panel) panel.hidden = true;
+    if (panel) {
+      panel.hidden = true;
+      if (panel._home && panel.parentElement === document.body) panel._home.append(panel);
+    }
     if (btn) btn.setAttribute('aria-expanded', 'false');
   }
 
@@ -1648,16 +2307,15 @@ const KuiperUI = (() => {
     const btn = document.getElementById('f-editor-menu');
     if (!panel || !btn) return;
     closeDropMenus();
-    const open = panel.hidden;
-    panel.hidden = !open;
-    btn.setAttribute('aria-expanded', String(!open));
-    if (!open) return;
-    const r = btn.getBoundingClientRect();
-    panel.style.position = 'fixed';
-    panel.style.top = `${r.bottom + 6}px`;
-    panel.style.right = `${Math.max(8, window.innerWidth - r.right)}px`;
-    panel.style.left = 'auto';
-    panel.style.zIndex = '130';
+    if (!panel.hidden) {
+      closeEditorMenu();
+      return;
+    }
+    if (!panel._home) panel._home = btn.closest('.kuiper-editor-menu-wrap');
+    document.body.append(panel);
+    panel.hidden = false;
+    btn.setAttribute('aria-expanded', 'true');
+    positionAnchoredMenu(panel, btn, { width: 188 });
   }
 
   function textOffsetInMarked(root, container, offset) {
@@ -1962,7 +2620,6 @@ const KuiperUI = (() => {
     menuPanel.className = 'menu kuiper-editor-menu';
     menuPanel.hidden = true;
     menuPanel.innerHTML = `
-      <button type="button" id="f-editor-save"></button>
       <button type="button" id="f-editor-archive"></button>
       <button type="button" id="f-editor-delete" class="danger"></button>`;
     let primaryBtn = document.getElementById('f-editor-primary');
@@ -1978,6 +2635,7 @@ const KuiperUI = (() => {
     }
     const menuWrap = document.createElement('div');
     menuWrap.className = 'kuiper-editor-menu-wrap';
+    menuPanel._home = menuWrap;
     menuWrap.append(menuBtn, menuPanel);
     if (closeBtn) {
       closeBtn.classList.add('kuiper-editor-close');
@@ -2005,9 +2663,12 @@ const KuiperUI = (() => {
     aside.id = 'kuiperEditorAside';
     aside.innerHTML = `
       <div class="kuiper-aside-group">
+        ${editorSelectMarkup('kuiperEdTypeCtrl', 'issueType')}
         ${editorSelectMarkup('kuiperEdStageCtrl', 'stage')}
         ${editorSelectMarkup('kuiperEdProjectCtrl', 'project')}
+        ${editorSelectMarkup('kuiperEdParentCtrl', 'parentIssue')}
         ${editorSelectMarkup('kuiperEdEpicCtrl', 'epic')}
+        ${editorSelectMarkup('kuiperEdSprintCtrl', 'sprint')}
         ${editorSelectMarkup('kuiperEdPriCtrl', 'priority')}
         <div class="kuiper-ed-field kuiper-ed-flag-wrap" id="kuiperEdFlagWrap"></div>
       </div>`;
@@ -2042,6 +2703,9 @@ const KuiperUI = (() => {
         notesScrollAnchor = captureAnchorFromTextarea();
         notesEditing = false;
         syncNotesView();
+        if (editorEditingId && editorEditingId !== 'new') {
+          ctx.persistEditorDraft?.({ rerender: false });
+        }
       });
     }
 
@@ -2070,10 +2734,6 @@ const KuiperUI = (() => {
     bindDropdowns();
     aside.querySelectorAll('.kuiper-ctrl').forEach(wireCtrl);
 
-    document.getElementById('f-editor-save').onclick = () => {
-      closeEditorMenu();
-      ctx.saveEditor?.();
-    };
     document.getElementById('f-editor-archive').onclick = () => {
       closeEditorMenu();
       ctx.archiveEditorTask?.();
@@ -2127,10 +2787,44 @@ const KuiperUI = (() => {
     if (dlg) dlg.hidden = true;
   }
 
+  function commitAsideDraft(draft) {
+    if (editorEditingId && editorEditingId !== 'new') {
+      ctx.persistEditorDraft?.({ rerender: false });
+    }
+  }
+
   function renderEditorFields(draft) {
     if (!draft) return;
     const st = ctx.state?.();
     if (!st) return;
+
+    const issueType = BoardCore.normalizeIssueType(draft.issueType || 'task');
+    const isSub = BoardCore.isSubtask(draft);
+    if (isSub && draft.parentId) {
+      const parent = (st.tasks || []).find(t => t.id === draft.parentId);
+      if (parent) {
+        draft.projectId = parent.projectId;
+        draft.epicId = parent.epicId || null;
+        draft.sprintId = parent.sprintId || null;
+      }
+    }
+    const typePool = isSub
+      ? ['subtask']
+      : BoardCore.ISSUE_TYPES.filter(t => t !== 'subtask');
+    const typeOpts = typePool.map(t => ({
+      value: t,
+      label: issueTypeLabel(t),
+    }));
+    updateEditorSelect('kuiperEdTypeCtrl', typeOpts, issueType, value => {
+      if (isSub) return;
+      draft.issueType = BoardCore.normalizeIssueType(value);
+      if (!BoardCore.issueTypeAllowsEpicLink(draft.issueType)) draft.epicId = null;
+      if (!BoardCore.issueTypeAllowsParent(draft.issueType)) draft.parentId = null;
+      renderEditorFields(draft);
+      commitAsideDraft(draft);
+    }, {
+      optionHtml: opt => `<span class="kuiper-drop-opt kuiper-opt-issue">${issueTypeMarkHtml(opt.value, { size: 'sm' })}<span>${esc(opt.label)}</span></span>`,
+    });
 
     const stages = (st.columns || []).map(c => ({
       value: c.id,
@@ -2139,6 +2833,7 @@ const KuiperUI = (() => {
     updateEditorSelect('kuiperEdStageCtrl', stages, draft.columnId || st.columns[0]?.id, value => {
       draft.columnId = value;
       renderEditorFields(draft);
+      commitAsideDraft(draft);
     });
 
     const projects = [{ value: null, label: tr('none') }].concat(
@@ -2151,11 +2846,27 @@ const KuiperUI = (() => {
         if (epic && epic.projectId !== value) draft.epicId = null;
       }
       renderEditorFields(draft);
+      commitAsideDraft(draft);
     }, {
       optionHtml: (opt, active) => {
         if (!opt.color) return `<span class="kuiper-drop-opt">${esc(opt.label)}</span>`;
         return `<span class="kuiper-drop-opt kuiper-opt-proj" style="--c:${esc(opt.color)}"><span class="dot"></span><span>${esc(opt.label)}</span></span>`;
       },
+    });
+
+    const parentWrap = document.getElementById('kuiperEdParentCtrl')?.closest('.kuiper-ed-field');
+    const epicWrap = document.getElementById('kuiperEdEpicCtrl')?.closest('.kuiper-ed-field');
+    if (parentWrap) parentWrap.hidden = !BoardCore.issueTypeAllowsParent(issueType);
+    if (epicWrap) epicWrap.hidden = !BoardCore.issueTypeAllowsEpicLink(issueType);
+
+    const parents = [{ value: null, label: tr('none') }].concat(
+      parentsForProject(draft.projectId, editorEditingId === 'new' ? null : editorEditingId)
+        .map(t => ({ value: t.id, label: `${t.id} · ${t.title}` })),
+    );
+    updateEditorSelect('kuiperEdParentCtrl', parents, draft.parentId || null, value => {
+      draft.parentId = value;
+      renderEditorFields(draft);
+      commitAsideDraft(draft);
     });
 
     const epics = [{ value: null, label: tr('none') }].concat(
@@ -2164,10 +2875,30 @@ const KuiperUI = (() => {
     updateEditorSelect('kuiperEdEpicCtrl', epics, draft.epicId || null, value => {
       draft.epicId = value;
       renderEditorFields(draft);
+      commitAsideDraft(draft);
     }, {
       optionHtml: opt => {
         if (!opt.epic) return `<span class="kuiper-drop-opt">${esc(opt.label)}</span>`;
         return epicMarkHtml(opt.epic, { label: opt.label });
+      },
+    });
+
+    const sprintOpts = [{ value: null, label: tr('sprintNone') }].concat(
+      sprintsForProject(draft.projectId).map(s => ({
+        value: s.id,
+        label: s.name,
+        sprint: s,
+      })),
+    );
+    updateEditorSelect('kuiperEdSprintCtrl', sprintOpts, draft.sprintId || null, value => {
+      draft.sprintId = value;
+      renderEditorFields(draft);
+      commitAsideDraft(draft);
+    }, {
+      optionHtml: opt => {
+        if (!opt.sprint) return `<span class="kuiper-drop-opt">${esc(opt.label)}</span>`;
+        const range = `${opt.sprint.startDate || opt.sprint.start_date || ''} – ${opt.sprint.endDate || opt.sprint.end_date || ''}`;
+        return `<span class="kuiper-drop-opt" title="${esc(range)}">${esc(opt.label)}</span>`;
       },
     });
 
@@ -2179,26 +2910,40 @@ const KuiperUI = (() => {
     updateEditorSelect('kuiperEdPriCtrl', priOpts, draft.priority || 0, value => {
       draft.priority = value;
       renderEditorFields(draft);
+      commitAsideDraft(draft);
     }, {
       optionHtml: opt => priorityOptHtml(opt),
     });
 
+    setEditorFieldReadonly('kuiperEdTypeCtrl', isSub);
+    setEditorFieldReadonly('kuiperEdProjectCtrl', isSub);
+    setEditorFieldReadonly('kuiperEdEpicCtrl', isSub);
+    setEditorFieldReadonly('kuiperEdSprintCtrl', isSub);
+    setEditorFieldReadonly('kuiperEdParentCtrl', isSub);
+
+    if (editorEditingId && editorEditingId !== 'new') {
+      syncEditorCardId(editorEditingId, draft.issueType, draft);
+    }
     asideI18n();
   }
 
   function asideI18n() {
-    document.querySelectorAll('.kuiper-ed-lbl[data-i18n]').forEach(el => {
+    document.querySelectorAll('#kuiperEditorAside .kuiper-ed-lbl[data-i18n]').forEach(el => {
       el.textContent = tr(el.dataset.i18n);
     });
-    const saveBtn = document.getElementById('f-editor-save');
+    if (typeof KuiperIssuePanel !== 'undefined' && KuiperIssuePanel.i18nPanel) {
+      KuiperIssuePanel.i18nPanel();
+    }
     const archBtn = document.getElementById('f-editor-archive');
     const delBtn = document.getElementById('f-editor-delete');
     const primaryBtn = document.getElementById('f-editor-primary');
     const isNew = !editorEditingId || editorEditingId === 'new';
-    if (saveBtn) saveBtn.textContent = tr('save');
     if (archBtn) archBtn.textContent = tr('archive');
     if (delBtn) delBtn.textContent = tr('delete');
-    if (primaryBtn) primaryBtn.textContent = isNew ? tr('create') : tr('save');
+    if (primaryBtn) {
+      primaryBtn.textContent = tr('create');
+      primaryBtn.hidden = !isNew;
+    }
     const archItem = document.getElementById('f-editor-archive');
     if (archItem) archItem.hidden = isNew;
   }
@@ -2207,19 +2952,21 @@ const KuiperUI = (() => {
     ensureEditorLayout();
   }
 
-  function onEditorOpen(draft, editingId) {
+  function onEditorOpen(draft, editingId, editorOptions = {}) {
     ensureEditorLayout();
     editorEditingId = editingId;
     notesEditing = !draft?.notes?.trim();
     closeEditorMenu();
     closeDeleteDialog();
-    syncEditorCardId(editingId);
+    syncEditorCardId(editingId, draft?.issueType, draft);
     syncCardUrl(editingId);
     renderEditorFields(draft);
     syncNotesView(notesEditing);
     scheduleNotesLayout(0);
     asideI18n();
-    if (typeof KuiperIssuePanel !== 'undefined') KuiperIssuePanel.onEditorOpen(editingId, draft);
+    if (typeof KuiperIssuePanel !== 'undefined') {
+      KuiperIssuePanel.onEditorOpen(editingId, draft, editorOptions);
+    }
   }
 
   function onEditorClose() {
@@ -2245,14 +2992,64 @@ const KuiperUI = (() => {
     syncNotesView();
   }
 
+  function readEditorSelectValue(ctrlId) {
+    const ctrl = document.getElementById(ctrlId);
+    if (!ctrl) return undefined;
+    wireCtrl(ctrl);
+    const menu = menuOf(ctrl);
+    const items = menu?.querySelector('.kuiper-drop-items');
+    const btn = items?.querySelector('button[aria-selected="true"]');
+    if (!btn || btn.dataset.value == null) return undefined;
+    if (btn.dataset.value === '__null__') return null;
+    return btn.dataset.value;
+  }
+
+  /** Lee los desplegables del aside Kuiper al borrador antes de guardar. */
+  function captureEditorDraft(draft) {
+    if (!draft) return;
+    closeDropMenus();
+    const typeVal = readEditorSelectValue('kuiperEdTypeCtrl');
+    if (typeVal !== undefined) draft.issueType = BoardCore.normalizeIssueType(typeVal);
+    const stageVal = readEditorSelectValue('kuiperEdStageCtrl');
+    if (stageVal !== undefined) draft.columnId = stageVal;
+    const projectVal = readEditorSelectValue('kuiperEdProjectCtrl');
+    if (projectVal !== undefined) draft.projectId = projectVal;
+    const parentVal = readEditorSelectValue('kuiperEdParentCtrl');
+    if (parentVal !== undefined) draft.parentId = parentVal;
+    const epicVal = readEditorSelectValue('kuiperEdEpicCtrl');
+    if (epicVal !== undefined) draft.epicId = epicVal;
+    const sprintVal = readEditorSelectValue('kuiperEdSprintCtrl');
+    if (sprintVal !== undefined) draft.sprintId = sprintVal;
+    const priVal = readEditorSelectValue('kuiperEdPriCtrl');
+    if (priVal !== undefined) draft.priority = Number(priVal) || 0;
+  }
+
   function patchFromTask(prev, t) {
     const patch = {};
     if ((prev.epicId || null) !== (t.epicId || null)) patch.epic_id = t.epicId || null;
+    if ((prev.parentId || null) !== (t.parentId || null)) patch.parent_id = t.parentId || null;
+    const prevType = BoardCore.normalizeIssueType(prev.issueType);
+    const nextType = BoardCore.normalizeIssueType(t.issueType);
+    if (prevType !== nextType) patch.issue_type = nextType;
     if ((prev.priority || 0) !== (t.priority || 0)) patch.priority = t.priority || 0;
     if (prev.projectId !== t.projectId) patch.project_id = t.projectId;
+    if ((prev.sprintId || null) !== (t.sprintId || null)) patch.sprint_id = t.sprintId || null;
     if (typeof KuiperIssuePanel !== 'undefined') {
       Object.assign(patch, KuiperIssuePanel.patchFromTask(prev, t));
     }
+    return patch;
+  }
+
+  function buildCardPatch(prev, t) {
+    if (!prev || !t) return {};
+    const patch = {};
+    if (prev.columnId !== t.columnId) patch.stage_id = t.columnId;
+    if (prev.order !== t.order) patch.position = t.order;
+    if (prev.title !== t.title) patch.title = t.title;
+    if ((prev.notes || '') !== (t.notes || '')) patch.notes = t.notes || '';
+    if ((prev.session || '') !== (t.session || '')) patch.session_ref = t.session || '';
+    if (prev.flag !== t.flag) patch.flagged = !!t.flag;
+    Object.assign(patch, patchFromTask(prev, t));
     return patch;
   }
 
@@ -2269,7 +3066,10 @@ const KuiperUI = (() => {
       notes: patch.notes || '',
       session_ref: patch.session || '',
       stage_id: patch.columnId,
+      issue_type: BoardCore.normalizeIssueType(patch.issueType),
+      parent_id: patch.parentId || null,
       epic_id: patch.epicId || null,
+      sprint_id: patch.sprintId || null,
       flagged: !!patch.flag,
       priority: patch.priority || 0,
       estimated_minutes: patch.estimatedMinutes ?? null,
@@ -2283,7 +3083,13 @@ const KuiperUI = (() => {
     init,
     getBoardView,
     setBoardView,
+    isWorkspaceView,
+    enterWorkspace,
+    exitWorkspace,
     visibleTasks,
+    subtasksOf,
+    renderSubtasksPanel,
+    addSubtaskFromEditor,
     projectOf,
     applySchedulePatches,
     applySchedulePatchesLocal,
@@ -2308,9 +3114,13 @@ const KuiperUI = (() => {
     decorateCardMeta,
     buildCardMeta,
     cardIdRowHtml,
+    refreshBoardCard,
+    cardIdButtonHtml,
     bindCardIdButtons,
     cardPriorityBadge,
     priorityMarkHtml,
+    issueTypeMarkHtml,
+    issueTypeLabel,
     migratePrefsToState,
     openCardFromUrl,
     syncCardUrl,
@@ -2320,14 +3130,19 @@ const KuiperUI = (() => {
     onEditorOpen,
     onEditorClose,
     flushEditor,
+    captureEditorDraft,
     patchFromTask,
+    buildCardPatch,
     buildCreateBody,
     mountSelect: updateEditorSelect,
     closeDropMenus,
+    openAnchoredPickMenu,
+    priorityPickOptionHtml: priorityOptHtml,
     renderSidebar,
     mountRailControls,
     renderRailControls,
     setSidebarOpen,
+    toggleSprintFilter,
   };
 })();
 

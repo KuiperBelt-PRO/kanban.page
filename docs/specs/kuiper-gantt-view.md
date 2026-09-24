@@ -89,7 +89,7 @@ flowchart LR
 | Zona | Contenido |
 | --- | --- |
 | Sidebar filas | Label de grupo (proyecto/épica/prioridad) + filas de issues |
-| Timeline header | Marcas según zoom; línea vertical «hoy» |
+| Timeline header | Marcas según zoom; línea vertical «hoy»; bandas de sprint → [`kuiper-sprints.md`](kuiper-sprints.md) §8 |
 | Canvas | Barras, grid, flechas de dependencia |
 | Panel inferior | Issues sin `schedule_start_date` ni `schedule_end_date` |
 

@@ -23,7 +23,7 @@ function snapshotToState(snapshot) {
     code: p.code || null,
     organizationId: p.organization_id || snapshot.organization?.id || null,
     organizationSlug: p.organization_slug || snapshot.organization?.slug || null,
-    color: ENTITY_COLORS[index % ENTITY_COLORS.length],
+    color: p.color || ENTITY_COLORS[index % ENTITY_COLORS.length],
     mt: now,
   }));
   const epics = (snapshot.epics || []).map((e, index) => ({
@@ -31,7 +31,34 @@ function snapshotToState(snapshot) {
     projectId: e.project_id,
     title: e.title,
     status: e.status,
+    sprintId: e.sprint_id || null,
     color: ENTITY_COLORS[index % ENTITY_COLORS.length],
+    mt: now,
+  }));
+  const epicIds = new Set(epics.map(e => e.id));
+  for (const card of snapshot.cards || []) {
+    if (card.archived || card.issue_type !== 'epic' || epicIds.has(card.id)) continue;
+    epicIds.add(card.id);
+    epics.push({
+      id: card.id,
+      projectId: card.project_id,
+      title: card.title,
+      status: null,
+      sprintId: card.sprint_id || null,
+      color: ENTITY_COLORS[epics.length % ENTITY_COLORS.length],
+      mt: now,
+    });
+  }
+  const sprintsList = (snapshot.sprints || []).map((s, index) => ({
+    id: s.id,
+    slug: s.slug,
+    name: s.name,
+    goal: s.goal || null,
+    startDate: s.start_date,
+    endDate: s.end_date,
+    status: s.status || 'planned',
+    projectIds: s.project_ids || [],
+    color: ENTITY_COLORS[(index + 3) % ENTITY_COLORS.length],
     mt: now,
   }));
   const tasks = [];
@@ -43,6 +70,9 @@ function snapshotToState(snapshot) {
       notes: card.notes || '',
       projectId: card.project_id,
       epicId: card.epic_id || null,
+      sprintId: card.sprint_id || null,
+      issueType: card.issue_type || 'task',
+      parentId: card.parent_id || null,
       priority: card.priority != null ? card.priority : 0,
       estimatedMinutes: card.estimated_minutes != null ? card.estimated_minutes : null,
       tags: (card.tags || []).map(t => t.name),
@@ -73,6 +103,8 @@ function snapshotToState(snapshot) {
     projectsMt: now,
     epics,
     epicsMt: now,
+    sprints: sprintsList,
+    sprintsMt: now,
     tasks,
     events: [],
     theme: 'dark',
@@ -80,6 +112,8 @@ function snapshotToState(snapshot) {
     epicFilter: null,
     projectFilters: [],
     epicFilters: [],
+    sprintFilters: [],
+    issueTypeFilters: [],
     groupBy: 'none',
     sortBy: 'position',
     _kuiper: {

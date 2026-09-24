@@ -21,8 +21,8 @@
 ### KB-1 Rail y sidebar
 
 1. Toggle sidebar; favoritos; árbol org/board/proyecto.
-2. Filtros: proyecto, épica, prioridad, flag (multi-select donde aplique).
-3. Agrupación (`groupBy`): `none` | `project` | `epic` | `priority`.
+2. Filtros: proyecto, épica, sprint (ver [`kuiper-sprints.md`](kuiper-sprints.md)), prioridad, flag (multi-select donde aplique).
+3. Agrupación (`groupBy`): `none` | `project` | `epic` | `sprint` | `priority`.
 4. Ordenación (`sortBy`): posición | prioridad | `updatedAt`.
 
 ### KB-2 Columnas (sin swimlanes)
@@ -40,6 +40,8 @@
 5. Separador: `.kuiper-swimlane-sep` con marca (dot/tri/prioridad), label, count.
 
 ### KB-4 Tarjeta colapsada (`.kuiper-card`)
+
+Las issues `subtask` **no** se renderizan como tarjetas en columnas; solo issues de primer nivel. Progreso de subtareas en el padre: [`kuiper-subtasks.md`](kuiper-subtasks.md) §ST-3.
 
 Orden visual del meta:
 

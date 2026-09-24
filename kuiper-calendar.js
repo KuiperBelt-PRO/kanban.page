@@ -168,8 +168,12 @@ const KuiperCalendar = (() => {
     const color = p?.color || '#9AA5B8';
     const cls = milestone ? 'kuiper-cal-chip is-milestone' : 'kuiper-cal-chip';
     const mark = milestone ? '<span class="kuiper-cal-chip-milestone" aria-hidden="true"></span>' : '';
+    const typeIcon = typeof KuiperUI !== 'undefined' && KuiperUI.issueTypeMarkHtml
+      ? KuiperUI.issueTypeMarkHtml(t.issueType, { size: 'sm' })
+      : '';
     return `<button type="button" class="${cls}" data-task-id="${esc(t.id)}" style="--c:${esc(color)}" title="${esc(t.title)}">
       ${mark}
+      ${typeIcon}
       <span class="kuiper-cal-chip-id">${esc(t.id)}</span>
       <span class="kuiper-cal-chip-title">${esc(t.title)}</span>
     </button>`;

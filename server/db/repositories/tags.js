@@ -75,6 +75,46 @@ function mapForBoardCards(db, boardId) {
   return map;
 }
 
+function create(db, boardId, rawName) {
+  const name = normalizeName(rawName);
+  if (!name) throw new Error('tag name required');
+  const existing = db.prepare(`
+    SELECT * FROM tags WHERE board_id = ? AND name = ? COLLATE NOCASE
+  `).get(boardId, name);
+  if (existing) return existing;
+  const id = entityId();
+  const ts = nowIso();
+  db.prepare(`
+    INSERT INTO tags(id, board_id, name, created_at) VALUES (?, ?, ?, ?)
+  `).run(id, boardId, name, ts);
+  return db.prepare('SELECT * FROM tags WHERE id = ?').get(id);
+}
+
+function getById(db, id) {
+  return db.prepare('SELECT * FROM tags WHERE id = ?').get(id) || null;
+}
+
+function rename(db, id, rawName) {
+  const tag = getById(db, id);
+  if (!tag) throw new Error('tag not found');
+  const name = normalizeName(rawName);
+  if (!name) throw new Error('tag name required');
+  const clash = db.prepare(`
+    SELECT id FROM tags WHERE board_id = ? AND name = ? COLLATE NOCASE AND id != ?
+  `).get(tag.board_id, name, id);
+  if (clash) throw new Error('tag name already exists');
+  db.prepare('UPDATE tags SET name = ? WHERE id = ?').run(name, id);
+  return getById(db, id);
+}
+
+function remove(db, id) {
+  const tag = getById(db, id);
+  if (!tag) throw new Error('tag not found');
+  db.prepare('DELETE FROM card_tags WHERE tag_id = ?').run(id);
+  db.prepare('DELETE FROM tags WHERE id = ?').run(id);
+  return { removed: true };
+}
+
 module.exports = {
   normalizeName,
   listByBoard,
@@ -82,4 +122,8 @@ module.exports = {
   listForCard,
   setForCard,
   mapForBoardCards,
+  create,
+  getById,
+  rename,
+  remove,
 };

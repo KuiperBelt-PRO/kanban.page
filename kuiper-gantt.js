@@ -16,7 +16,9 @@ const KuiperGantt = (() => {
   const MAX_VIEWPORT_DAYS = { day: 105, week: 210, month: 365 };
   const SCROLL_EDGE_PX = 96;
   const COL_ZOOM_LEVELS = [0.6, 0.75, 0.9, 1, 1.2, 1.5, 2];
-  const TIMELINE_HEADER_H = 52;
+  const TIMELINE_HEADER_BASE_H = 52;
+  const SPRINT_BAND_H = 18;
+  const SPRINT_BAND_MAX_ROWS = 3;
   let selectedCardId = null;
   let timelineRangePick = null;
   let hostEl = null;
@@ -554,7 +556,7 @@ const KuiperGantt = (() => {
         color: p?.color,
         data: { cardId: t.id, unscheduled: false },
       });
-      return;
+      return num;
     }
     if (scheduled) {
       tasks.push({
@@ -567,7 +569,7 @@ const KuiperGantt = (() => {
         color: p?.color,
         data: { cardId: t.id, unscheduled: false },
       });
-      return;
+      return num;
     }
     tasks.push({
       id: num,
@@ -580,6 +582,14 @@ const KuiperGantt = (() => {
       color: p?.color,
       data: { cardId: t.id, unscheduled: true },
     });
+    return num;
+  }
+
+  function pushCardWithSubtasks(tasks, t, parentId, today) {
+    const num = pushCardTask(tasks, t, parentId, today);
+    for (const sub of KuiperUI.sortTasks(KuiperUI.subtasksOf(t.id))) {
+      pushCardTask(tasks, sub, num, today);
+    }
   }
 
   function pushGroupHeader(tasks, groupBy, lane, groupTasks, today) {
@@ -611,13 +621,13 @@ const KuiperGantt = (() => {
     const groupBy = st.groupBy || 'none';
 
     if (groupBy === 'none') {
-      for (const t of KuiperUI.sortTasks(visible)) pushCardTask(tasks, t, null, today);
+      for (const t of KuiperUI.sortTasks(visible)) pushCardWithSubtasks(tasks, t, null, today);
     } else {
       for (const lane of KuiperUI.orderedSwimlanes(visible)) {
         const laneTasks = KuiperUI.sortTasks(visible.filter(t => KuiperUI.taskInLane(t, lane.key)));
         if (!laneTasks.length) continue;
         const headerId = pushGroupHeader(tasks, groupBy, lane, laneTasks, today);
-        for (const t of laneTasks) pushCardTask(tasks, t, headerId, today);
+        for (const t of laneTasks) pushCardWithSubtasks(tasks, t, headerId, today);
       }
     }
 
@@ -782,6 +792,16 @@ const KuiperGantt = (() => {
     return { x, y: top + height / 2 };
   }
 
+  function timelineHeaderEl(root) {
+    const right = root?.querySelector?.('[data-pane="right"]');
+    return right?.firstElementChild || null;
+  }
+
+  function timelineHeaderHeightPx(root) {
+    const header = timelineHeaderEl(root);
+    return header?.offsetHeight || TIMELINE_HEADER_BASE_H;
+  }
+
   function getRightScrollContainer(root) {
     const right = root.querySelector('[data-pane="right"]');
     return right?.children[1] || null;
@@ -822,7 +842,8 @@ const KuiperGantt = (() => {
       overlay.append(svg);
       sc.append(overlay);
     }
-    overlay.style.top = abs.style.top || '52px';
+    const headerH = timelineHeaderHeightPx(root);
+    overlay.style.top = abs.style.top || `${headerH}px`;
     overlay.style.width = abs.style.width;
     overlay.style.height = abs.style.height;
     const svg = overlay.querySelector('svg');
@@ -906,7 +927,8 @@ const KuiperGantt = (() => {
   function stretchTimelineHeight(root) {
     const scrollEl = root?.children[0];
     if (!scrollEl || scrollEl.clientHeight <= 0) return;
-    const minBody = Math.max(0, scrollEl.clientHeight - TIMELINE_HEADER_H);
+    const headerH = timelineHeaderHeightPx(root);
+    const minBody = Math.max(0, scrollEl.clientHeight - headerH);
     const leftBody = leftPaneBody(root);
     const sc = getRightScrollContainer(root);
     const stripe = sc?.children[0];
@@ -969,7 +991,8 @@ const KuiperGantt = (() => {
     const rect = right.getBoundingClientRect();
     const x = event.clientX - rect.left + scrollEl.scrollLeft;
     const y = event.clientY - rect.top;
-    if (y < TIMELINE_HEADER_H) return null;
+    const headerH = timelineHeaderHeightPx(root);
+    if (y < headerH) return null;
     const mapper = createPixelMapper(chartOpts.scale, new Date(`${chartOpts.viewportStart || BoardCore.ymd()}T00:00:00Z`));
     const d = mapper.toDate(x);
     const ymd = BoardCore.ymd(d);
@@ -981,7 +1004,8 @@ const KuiperGantt = (() => {
     const leftBody = leftPaneBody(root);
     if (!scrollEl || !leftBody) return null;
     const scrollRect = scrollEl.getBoundingClientRect();
-    const yInContent = event.clientY - scrollRect.top + scrollEl.scrollTop - TIMELINE_HEADER_H;
+    const headerH = timelineHeaderHeightPx(root);
+    const yInContent = event.clientY - scrollRect.top + scrollEl.scrollTop - headerH;
     if (yInContent < 0) return null;
     const pad = leftBody.firstElementChild;
     const paddingTop = pad && !pad.classList.contains('gantt-row')
@@ -1360,7 +1384,95 @@ const KuiperGantt = (() => {
     bezierObserver.observe(abs, { childList: true, subtree: true });
   }
 
+  function assignSprintBandRows(bands) {
+    const sorted = [...bands].sort((a, b) => a.x - b.x);
+    const rowMap = new Map();
+    const rowEnds = [];
+    for (const band of sorted) {
+      let row = 0;
+      while (row < SPRINT_BAND_MAX_ROWS && rowEnds[row] != null && band.x < rowEnds[row]) row += 1;
+      if (row >= SPRINT_BAND_MAX_ROWS) row = SPRINT_BAND_MAX_ROWS - 1;
+      rowMap.set(band.id, row);
+      rowEnds[row] = band.x + band.width;
+    }
+    return rowMap;
+  }
+
+  function renderSprintBands(root) {
+    const header = timelineHeaderEl(root);
+    if (!header || !ganttLib) return;
+    header.querySelector('.kuiper-gantt-sprint-layer')?.remove();
+
+    const st = ctx.state?.();
+    const vpStart = chartOpts.viewportStart;
+    const vpEnd = chartOpts.viewportEnd;
+    if (!st || !vpStart || !vpEnd) return;
+
+    const boardProjectIds = new Set((st.projects || []).map(p => p.id));
+    const candidates = BoardCore.sortSprintsForUi(st.sprints || []).filter(s =>
+      BoardCore.sprintOverlapsRange(s, vpStart, vpEnd)
+      && (s.projectIds || []).some(pid => boardProjectIds.has(pid)),
+    );
+    if (!candidates.length) return;
+
+    const mapper = pixelMapperForViewport();
+    if (!mapper) return;
+
+    const widthEl = header.querySelector('div');
+    const totalWidth = widthEl ? parseFloat(widthEl.style.width) : 0;
+    if (!totalWidth) return;
+
+    const msDay = 86400000;
+    const bands = candidates.map(s => {
+      const start = s.startDate || s.start_date;
+      const end = s.endDate || s.end_date;
+      const x = mapper.toX(new Date(`${start}T00:00:00Z`));
+      const endMs = new Date(`${end}T00:00:00Z`).getTime() + msDay;
+      const width = Math.max(4, mapper.toX(new Date(endMs)) - x);
+      return { id: s.id, name: s.name, color: s.color, start, end, x, width };
+    });
+
+    const rowMap = assignSprintBandRows(bands);
+    const rowCount = Math.min(
+      SPRINT_BAND_MAX_ROWS,
+      Math.max(0, ...bands.map(b => (rowMap.get(b.id) ?? 0) + 1)),
+    );
+    const layerH = rowCount * SPRINT_BAND_H;
+
+    const layer = document.createElement('div');
+    layer.className = 'kuiper-gantt-sprint-layer';
+    layer.style.width = `${totalWidth}px`;
+    layer.style.height = `${layerH}px`;
+
+    for (const band of bands) {
+      const row = rowMap.get(band.id) || 0;
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'kuiper-gantt-sprint-band';
+      btn.style.left = `${band.x}px`;
+      btn.style.width = `${band.width}px`;
+      btn.style.top = `${row * SPRINT_BAND_H}px`;
+      if (band.color) btn.style.setProperty('--sprint-c', band.color);
+      btn.title = `${band.name} (${band.start} – ${band.end})`;
+      btn.setAttribute('aria-label', band.name);
+      const label = document.createElement('span');
+      label.className = 'kuiper-gantt-sprint-band-label';
+      label.textContent = band.name;
+      btn.append(label);
+      btn.onclick = e => {
+        e.preventDefault();
+        e.stopPropagation();
+        KuiperUI.toggleSprintFilter?.(band.id);
+        ctx.renderBoard?.();
+      };
+      layer.append(btn);
+    }
+
+    header.append(layer);
+  }
+
   function afterChartUpdate(root, token) {
+    renderSprintBands(root);
     stretchTimelineHeight(root);
     scheduleBezierSync(root);
     enhanceLeftPaneRows(root);

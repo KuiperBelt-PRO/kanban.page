@@ -11,8 +11,17 @@ function getDetail(db, cardId) {
   const card = cards.getById(db, cardId);
   if (!card) throw new Error('card not found');
   const boardId = card.board_id;
+  const subtasks = cards.listSubtasks(db, cardId).map(c => ({
+    id: c.id,
+    title: c.title,
+    issue_type: c.issue_type,
+    stage_id: c.stage_id,
+    parent_id: c.parent_id,
+    position: c.position,
+  }));
   return {
     card,
+    subtasks,
     tags: tags.listForCard(db, cardId),
     boardTags: tags.listByBoard(db, boardId),
     links: cardLinks.summaryForCard(db, cardId),

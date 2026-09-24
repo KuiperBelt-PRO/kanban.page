@@ -16,10 +16,14 @@
 | [`specs/classic-board.md`](specs/classic-board.md) | Tablero clásico: localStorage, eventos, informe, render, drag, sync |
 | [`specs/kuiper-platform.md`](specs/kuiper-platform.md) | Modo Kuiper: SQLite, `kanban serve`, API, CLI local |
 | [`specs/kuiper-board-ui.md`](specs/kuiper-board-ui.md) | UI del tablero Kuiper: rail, swimlanes, tarjetas, filtros |
+| [`specs/kuiper-list-view.md`](specs/kuiper-list-view.md) | Vista Lista (tabla de issues, filtros y agrupación compartidos) |
 | [`specs/kuiper-editor.md`](specs/kuiper-editor.md) | Editor de issue, colaboración, creación desde columna |
 | [`specs/kuiper-issue-schedule.md`](specs/kuiper-issue-schedule.md) | Fechas de planificación (`schedule_start_date` / `schedule_end_date`) |
 | [`specs/kuiper-calendar-view.md`](specs/kuiper-calendar-view.md) | Vista Calendario (mes/semana/día) |
 | [`specs/kuiper-gantt-view.md`](specs/kuiper-gantt-view.md) | Vista Gantt (barras, zoom, dependencias) |
+| [`specs/kuiper-workspace-admin.md`](specs/kuiper-workspace-admin.md) | UI administración: proyectos, tableros, etapas, épicas, tags |
+| [`specs/kuiper-sprints.md`](specs/kuiper-sprints.md) | Sprints: fechas, proyectos, filtros, agrupación, bandas Gantt |
+| [`specs/kuiper-subtasks.md`](specs/kuiper-subtasks.md) | Subtareas: jerarquía, checklist en el padre, herencia, tablero |
 
 ## Diseño visual
 

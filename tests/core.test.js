@@ -1428,6 +1428,13 @@ test('cascadeEndResize shifts blocking successors by end delta', () => {
   });
 });
 
+test('datesOverlap inclusive ISO ranges', () => {
+  assert.equal(C.datesOverlap('2026-09-01', '2026-09-10', '2026-09-05', '2026-09-15'), true);
+  assert.equal(C.datesOverlap('2026-09-01', '2026-09-03', '2026-09-10', '2026-09-12'), false);
+  assert.equal(C.datesOverlap('2026-09-10', '2026-09-10', '2026-09-10', '2026-09-10'), true);
+  assert.equal(C.datesOverlap(null, '2026-09-10', '2026-09-05', '2026-09-15'), false);
+});
+
 test('cascadeScheduleMove shifts blocking successors recursively', () => {
   const tasks = [
     { id: 'a', scheduleStartDate: '2026-09-01', scheduleEndDate: '2026-09-03', blocks: [{ id: 'b' }] },
@@ -1444,4 +1451,27 @@ test('cascadeScheduleMove shifts blocking successors recursively', () => {
   assert.deepEqual(patches.find(p => p.id === 'c'), {
     id: 'c', schedule_start_date: '2026-09-10', schedule_end_date: '2026-09-11',
   });
+});
+
+test('normalizeIssueType matches Jira-like types', () => {
+  assert.equal(C.normalizeIssueType('Story'), 'story');
+  assert.equal(C.normalizeIssueType('spike'), 'spike');
+  assert.equal(C.normalizeIssueType('bogus'), 'task');
+  assert.equal(C.issueTypeAllowsEpicLink('bug'), true);
+  assert.equal(C.issueTypeAllowsEpicLink('spike'), true);
+  assert.equal(C.issueTypeAllowsEpicLink('epic'), false);
+  assert.equal(C.issueTypeAllowsParent('subtask'), true);
+  assert.ok(C.ISSUE_TYPES.includes('initiative'));
+});
+
+test('isBoardTopLevelTask excludes subtasks', () => {
+  assert.equal(C.isBoardTopLevelTask({ issueType: 'task', parentId: null }), true);
+  assert.equal(C.isBoardTopLevelTask({ issueType: 'subtask', parentId: 'VIBE-1' }), false);
+  assert.equal(C.isBoardTopLevelTask({ issueType: 'task', parentId: 'VIBE-1' }), false);
+});
+
+test('subtaskIsDone uses last stage by order', () => {
+  const cols = [{ id: 'a', order: 0 }, { id: 'b', order: 1 }, { id: 'c', order: 2 }];
+  assert.equal(C.subtaskIsDone({ columnId: 'c' }, cols), true);
+  assert.equal(C.subtaskIsDone({ columnId: 'a' }, cols), false);
 });

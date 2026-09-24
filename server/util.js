@@ -28,6 +28,7 @@ function rowToCard(row) {
     project_id: row.project_id,
     board_id: row.board_id,
     epic_id: row.epic_id,
+    sprint_id: row.sprint_id || null,
     stage_id: row.stage_id,
     position: row.position,
     title: row.title,
@@ -39,6 +40,8 @@ function rowToCard(row) {
     estimated_minutes: row.estimated_minutes != null ? row.estimated_minutes : null,
     schedule_start_date: row.schedule_start_date || null,
     schedule_end_date: row.schedule_end_date || null,
+    issue_type: row.issue_type || 'task',
+    parent_id: row.parent_id || null,
     created_at: row.created_at,
     updated_at: row.updated_at,
   };

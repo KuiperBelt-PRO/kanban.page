@@ -26,4 +26,14 @@ function list(db) {
   return db.prepare('SELECT * FROM organizations ORDER BY name COLLATE NOCASE').all();
 }
 
-module.exports = { create, getById, getBySlug, list };
+function update(db, slug, { name }) {
+  const org = getBySlug(db, slug);
+  if (!org) throw new Error('organization not found');
+  const finalName = name != null ? name : org.name;
+  const ts = nowIso();
+  db.prepare('UPDATE organizations SET name = ?, updated_at = ? WHERE id = ?')
+    .run(finalName, ts, org.id);
+  return getById(db, org.id);
+}
+
+module.exports = { create, getById, getBySlug, list, update };

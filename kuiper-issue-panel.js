@@ -115,6 +115,12 @@ const KuiperIssuePanel = (() => {
       id: l.id, title: l.title, linkId: l.link_id,
     }));
     t.timeLoggedMinutes = detail.timeLoggedMinutes || 0;
+    if (detail.card?.issue_type != null) {
+      t.issueType = BoardCore.normalizeIssueType(detail.card.issue_type);
+    }
+    if (detail.card?.parent_id !== undefined) {
+      t.parentId = detail.card.parent_id || null;
+    }
     t.activeTimer = detail.activeTimer ? {
       id: detail.activeTimer.id,
       startedAt: detail.activeTimer.started_at,
@@ -133,8 +139,86 @@ const KuiperIssuePanel = (() => {
     ctx.onDetailChanged?.();
   }
 
+  function ensureSubtasksTabUpgrade() {
+    const bar = document.querySelector('#kuiperIssueTabs .kuiper-issue-tabbar');
+    const panels = document.querySelector('#kuiperIssueTabs .kuiper-issue-tabpanels');
+    if (!bar || !panels || bar.querySelector('[data-tab="subtasks"]')) return;
+    const commentsTab = bar.querySelector('[data-tab="comments"]');
+    const timeTab = bar.querySelector('[data-tab="time"]');
+    if (!commentsTab || !timeTab) return;
+    const subBtn = document.createElement('button');
+    subBtn.type = 'button';
+    subBtn.className = 'kuiper-issue-tab';
+    subBtn.dataset.tab = 'subtasks';
+    subBtn.setAttribute('role', 'tab');
+    subBtn.setAttribute('aria-pressed', 'false');
+    subBtn.dataset.i18n = 'tabSubtasks';
+    subBtn.hidden = true;
+    subBtn.innerHTML = '<span class="kuiper-tab-text" data-i18n="tabSubtasks"></span><span class="kuiper-tab-subtask-badge" hidden aria-hidden="true"></span>';
+    subBtn.addEventListener('click', () => setTab('subtasks'));
+    const historyTab = bar.querySelector('[data-tab="history"]');
+    if (historyTab) historyTab.after(subBtn);
+    else timeTab.before(subBtn);
+    const historyPanel = panels.querySelector('[data-panel="history"]');
+    if (!historyPanel) return;
+    const section = document.createElement('section');
+    section.className = 'kuiper-issue-panel';
+    section.dataset.panel = 'subtasks';
+    section.setAttribute('role', 'tabpanel');
+    section.hidden = true;
+    section.innerHTML = `
+      <div class="kuiper-subtasks-shell">
+        <form class="kuiper-subtasks-add-form" id="kuiperSubtasksAddForm">
+          <input type="text" class="kuiper-linked-input kuiper-subtasks-input" autocomplete="off" spellcheck="false" data-i18n-placeholder="addSubtask">
+        </form>
+        <div class="kuiper-subtasks-list-scroll kuiper-scroll">
+          <div class="kuiper-subtasks kuiper-subtasks-tab" id="kuiperSubtasksPanel"></div>
+        </div>
+      </div>`;
+    historyPanel.after(section);
+    document.getElementById('kuiperSubtasksAddForm')?.addEventListener('submit', e => {
+      e.preventDefault();
+      const input = e.target.querySelector('.kuiper-subtasks-input');
+      if (typeof KuiperUI !== 'undefined' && currentCardId && input) {
+        void KuiperUI.addSubtaskFromEditor(currentCardId, input.value, input);
+      }
+    });
+  }
+
+  function ensureSubtasksTabOrder() {
+    const bar = document.querySelector('#kuiperIssueTabs .kuiper-issue-tabbar');
+    const panels = document.querySelector('#kuiperIssueTabs .kuiper-issue-tabpanels');
+    const subTab = bar?.querySelector('[data-tab="subtasks"]');
+    const historyTab = bar?.querySelector('[data-tab="history"]');
+    const subPanel = panels?.querySelector('[data-panel="subtasks"]');
+    const historyPanel = panels?.querySelector('[data-panel="history"]');
+    if (subTab && historyTab && subTab !== historyTab.nextElementSibling) {
+      historyTab.after(subTab);
+    }
+    if (subPanel && historyPanel && subPanel !== historyPanel.nextElementSibling) {
+      historyPanel.after(subPanel);
+    }
+    if (subTab && !subTab.querySelector('.kuiper-tab-text')) {
+      const label = subTab.textContent;
+      subTab.textContent = '';
+      const text = document.createElement('span');
+      text.className = 'kuiper-tab-text';
+      text.dataset.i18n = 'tabSubtasks';
+      text.textContent = label || tr('tabSubtasks');
+      const badge = document.createElement('span');
+      badge.className = 'kuiper-tab-subtask-badge';
+      badge.hidden = true;
+      badge.setAttribute('aria-hidden', 'true');
+      subTab.append(text, badge);
+    }
+  }
+
   function ensureLayout() {
-    if (panelReady) return;
+    if (panelReady) {
+      ensureSubtasksTabUpgrade();
+      ensureSubtasksTabOrder();
+      return;
+    }
     const aside = document.getElementById('kuiperEditorAside');
     const main = document.querySelector('.kuiper-editor-main');
     const notesWrap = document.querySelector('.kuiper-notes-wrap');
@@ -304,6 +388,10 @@ const KuiperIssuePanel = (() => {
         <button type="button" class="kuiper-issue-tab" data-tab="comments" role="tab" aria-pressed="true" data-i18n="tabComments"></button>
         <button type="button" class="kuiper-issue-tab" data-tab="time" role="tab" aria-pressed="false" data-i18n="tabTimeLog"></button>
         <button type="button" class="kuiper-issue-tab" data-tab="history" role="tab" aria-pressed="false" data-i18n="tabHistory"></button>
+        <button type="button" class="kuiper-issue-tab" data-tab="subtasks" role="tab" aria-pressed="false" hidden>
+          <span class="kuiper-tab-text" data-i18n="tabSubtasks"></span>
+          <span class="kuiper-tab-subtask-badge" hidden aria-hidden="true"></span>
+        </button>
       </div>
       <div class="kuiper-issue-tabpanels">
         <section class="kuiper-issue-panel active" data-panel="comments" role="tabpanel">
@@ -327,8 +415,25 @@ const KuiperIssuePanel = (() => {
             <div class="kuiper-history-list" id="kuiperHistoryList"></div>
           </div>
         </section>
+        <section class="kuiper-issue-panel" data-panel="subtasks" role="tabpanel" hidden>
+          <div class="kuiper-subtasks-shell">
+            <form class="kuiper-subtasks-add-form" id="kuiperSubtasksAddForm">
+              <input type="text" class="kuiper-linked-input kuiper-subtasks-input" autocomplete="off" spellcheck="false" data-i18n-placeholder="addSubtask">
+            </form>
+            <div class="kuiper-subtasks-list-scroll kuiper-scroll">
+              <div class="kuiper-subtasks kuiper-subtasks-tab" id="kuiperSubtasksPanel"></div>
+            </div>
+          </div>
+        </section>
       </div>`;
     lower.append(tabs);
+    document.getElementById('kuiperSubtasksAddForm')?.addEventListener('submit', e => {
+      e.preventDefault();
+      const input = e.target.querySelector('.kuiper-subtasks-input');
+      if (typeof KuiperUI !== 'undefined' && currentCardId && input) {
+        void KuiperUI.addSubtaskFromEditor(currentCardId, input.value, input);
+      }
+    });
 
     if (!document.getElementById('kuiperLinkSuggest')) {
       const suggest = document.createElement('div');
@@ -508,7 +613,12 @@ const KuiperIssuePanel = (() => {
         if (!check.ok && err) {
           err.hidden = false;
           err.textContent = tr('scheduleInvalidRange');
-        } else if (err) err.hidden = true;
+        } else {
+          if (err) err.hidden = true;
+          if (currentCardId && currentCardId !== 'new') {
+            ctx.persistEditorDraft?.({ rerender: false });
+          }
+        }
       },
     });
   }
@@ -1575,6 +1685,50 @@ const KuiperIssuePanel = (() => {
     el.innerHTML = items.map(renderCommentItem).join('');
   }
 
+  function updateSubtasksTab() {
+    const tab = document.querySelector('.kuiper-issue-tab[data-tab="subtasks"]');
+    const task = currentCardId && currentCardId !== 'new'
+      ? boardTasks().find(t => t.id === currentCardId)
+      : null;
+    const show = !!task && typeof BoardCore !== 'undefined' && !BoardCore.isSubtask(task);
+    if (tab) tab.hidden = !show;
+    if (!show) {
+      if (activeTab === 'subtasks') setTab('comments');
+      return;
+    }
+    const count = typeof KuiperUI !== 'undefined' ? KuiperUI.subtasksOf(currentCardId).length : 0;
+    if (tab) {
+      let textEl = tab.querySelector('.kuiper-tab-text');
+      if (!textEl) {
+        tab.textContent = '';
+        textEl = document.createElement('span');
+        textEl.className = 'kuiper-tab-text';
+        textEl.dataset.i18n = 'tabSubtasks';
+        tab.append(textEl);
+        const badge = document.createElement('span');
+        badge.className = 'kuiper-tab-subtask-badge';
+        badge.hidden = true;
+        badge.setAttribute('aria-hidden', 'true');
+        tab.append(badge);
+      }
+      textEl.textContent = tr('tabSubtasks');
+      const badge = tab.querySelector('.kuiper-tab-subtask-badge');
+      if (badge) {
+        if (count > 0 && typeof KuiperUI !== 'undefined') {
+          badge.hidden = false;
+          badge.removeAttribute('aria-hidden');
+          badge.setAttribute('aria-label', String(count));
+          badge.innerHTML = `${KuiperUI.issueTypeMarkHtml('subtask', { size: 'sm' })}<span class="kuiper-tab-badge-num">${count}</span>`;
+        } else {
+          badge.hidden = true;
+          badge.setAttribute('aria-hidden', 'true');
+          badge.innerHTML = '';
+        }
+      }
+    }
+    if (typeof KuiperUI !== 'undefined') KuiperUI.renderSubtasksPanel(currentCardId);
+  }
+
   function renderAll() {
     if (!panelReady) return;
     renderSchedule();
@@ -1587,10 +1741,16 @@ const KuiperIssuePanel = (() => {
     renderTimeLog();
     renderHistory();
     i18nPanel();
+    updateSubtasksTab();
   }
 
   function i18nPanel() {
     document.querySelectorAll('#kuiperIssueAsideExtras [data-i18n], #kuiperIssueTabs [data-i18n], #kuiperLinkedSection [data-i18n]').forEach(el => {
+      if (el.classList.contains('kuiper-tab-text')) {
+        el.textContent = tr(el.dataset.i18n);
+        return;
+      }
+      if (el.closest('.kuiper-issue-tab[data-tab="subtasks"]')) return;
       el.textContent = tr(el.dataset.i18n);
     });
     document.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
@@ -1614,7 +1774,7 @@ const KuiperIssuePanel = (() => {
     timerTick = null;
   }
 
-  async function onEditorOpen(cardId, draft) {
+  async function onEditorOpen(cardId, draft, editorOptions = {}) {
     ensureLayout();
     ensureLinkKindMenuPortal();
     editingCommentId = null;
@@ -1643,6 +1803,11 @@ const KuiperIssuePanel = (() => {
       detail = await KuiperStore.loadCardDetail(cardId);
       syncTaskFromDetail();
       renderAll();
+      if (editorOptions.issueTab === 'subtasks') {
+        const task = boardTasks().find(t => t.id === cardId);
+        const canSubtasks = task && typeof BoardCore !== 'undefined' && !BoardCore.isSubtask(task);
+        if (canSubtasks) setTab('subtasks');
+      }
       startTimerTick();
     } catch (err) {
       console.warn('card detail load failed', err);
@@ -1690,6 +1855,7 @@ const KuiperIssuePanel = (() => {
     validateScheduleDraft,
     reloadDetail,
     i18nPanel,
+    refreshSubtasksTab: updateSubtasksTab,
   };
 })();
 

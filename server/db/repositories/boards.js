@@ -76,10 +76,20 @@ function list(db, { organization_id, organization_slug }) {
     orgId = org ? org.id : null;
   }
   if (!orgId) {
-    return db.prepare('SELECT * FROM boards ORDER BY name COLLATE NOCASE').all();
+    return db.prepare('SELECT * FROM boards WHERE archived = 0 ORDER BY name COLLATE NOCASE').all();
   }
-  return db.prepare('SELECT * FROM boards WHERE organization_id = ? ORDER BY name COLLATE NOCASE')
+  return db.prepare('SELECT * FROM boards WHERE organization_id = ? AND archived = 0 ORDER BY name COLLATE NOCASE')
     .all(orgId);
+}
+
+function listForOrgAdmin(db, { organization_id, organization_slug }) {
+  let orgId = organization_id;
+  if (!orgId && organization_slug) {
+    const org = orgs.getBySlug(db, organization_slug);
+    orgId = org ? org.id : null;
+  }
+  if (!orgId) return [];
+  return db.prepare('SELECT * FROM boards WHERE organization_id = ? ORDER BY name COLLATE NOCASE').all(orgId);
 }
 
 function listStages(db, boardId) {
@@ -170,15 +180,28 @@ function getSnapshot(db, idOrSlug) {
   return cardDetail.enrichSnapshot(db, snapshot);
 }
 
-function updateBoard(db, boardId, { name }) {
+function updateBoard(db, boardId, { name, archived }) {
   const board = getById(db, boardId);
   if (!board) throw new Error('board not found');
   const finalName = name != null ? name : board.name;
+  const finalArchived = archived != null ? (archived ? 1 : 0) : board.archived;
   const ts = nowIso();
-  db.prepare('UPDATE boards SET name = ?, updated_at = ? WHERE id = ?')
-    .run(finalName, ts, boardId);
+  db.prepare('UPDATE boards SET name = ?, archived = ?, updated_at = ? WHERE id = ?')
+    .run(finalName, finalArchived, ts, boardId);
   bumpVersion(db, boardId);
   return getById(db, boardId);
+}
+
+function removeBoard(db, boardIdOrSlug) {
+  const board = resolveBoard(db, boardIdOrSlug);
+  if (!board) throw new Error('board not found');
+  const cardCount = db.prepare('SELECT COUNT(*) AS c FROM cards WHERE board_id = ?').get(board.id);
+  if (cardCount.c > 0) throw new Error('board has cards');
+  db.prepare('DELETE FROM board_projects WHERE board_id = ?').run(board.id);
+  db.prepare('DELETE FROM board_stages WHERE board_id = ?').run(board.id);
+  db.prepare('DELETE FROM board_versions WHERE board_id = ?').run(board.id);
+  db.prepare('DELETE FROM boards WHERE id = ?').run(board.id);
+  return { removed: true, slug: board.slug };
 }
 
 function createStage(db, boardId, name) {
@@ -207,15 +230,20 @@ function updateStage(db, boardId, stageId, { name }) {
 }
 
 function deleteStage(db, boardId, stageId) {
-  const stage = db.prepare('SELECT * FROM board_stages WHERE id = ? AND board_id = ?').get(stageId, boardId);
-  if (!stage) throw new Error('stage not found');
-  const n = db.prepare('SELECT COUNT(*) AS c FROM cards WHERE stage_id = ? AND archived = 0').get(stageId);
-  if (n.c > 0) throw new Error('stage has cards');
-  const count = db.prepare('SELECT COUNT(*) AS c FROM board_stages WHERE board_id = ?').get(boardId);
-  if (count.c <= 1) throw new Error('board needs at least one stage');
+  const stages = listStages(db, boardId);
+  const idx = stages.findIndex(s => s.id === stageId);
+  if (idx < 0) throw new Error('stage not found');
+  if (stages.length <= 1) throw new Error('board needs at least one stage');
+  const cardCount = db.prepare('SELECT COUNT(*) AS c FROM cards WHERE stage_id = ? AND archived = 0').get(stageId);
+  let movedToStageId = null;
+  if (cardCount.c > 0) {
+    if (idx > 0) movedToStageId = stages[idx - 1].id;
+    else movedToStageId = stages[1].id;
+    db.prepare('UPDATE cards SET stage_id = ? WHERE stage_id = ?').run(movedToStageId, stageId);
+  }
   db.prepare('DELETE FROM board_stages WHERE id = ?').run(stageId);
   bumpVersion(db, boardId);
-  return { removed: true };
+  return { removed: true, moved_cards: cardCount.c, moved_to_stage_id: movedToStageId };
 }
 
 function reorderStages(db, boardId, order) {
@@ -227,7 +255,11 @@ function reorderStages(db, boardId, order) {
     if (!set.has(id)) throw new Error('invalid stage id in order');
   }
   const upd = db.prepare('UPDATE board_stages SET position = ? WHERE id = ? AND board_id = ?');
-  ids.forEach((id, index) => upd.run(index + 1, id, boardId));
+  const apply = db.transaction(() => {
+    ids.forEach((id, index) => upd.run(-(index + 1), id, boardId));
+    ids.forEach((id, index) => upd.run(index + 1, id, boardId));
+  });
+  apply();
   bumpVersion(db, boardId);
   return listStages(db, boardId);
 }
@@ -245,6 +277,7 @@ module.exports = {
   getBySlug,
   resolveBoard,
   list,
+  listForOrgAdmin,
   listStages,
   listProjects,
   addProject,
@@ -258,4 +291,5 @@ module.exports = {
   deleteStage,
   reorderStages,
   getMembership,
+  removeBoard,
 };

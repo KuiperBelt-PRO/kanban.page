@@ -40,7 +40,10 @@ const tr = (key, vars) => I.t(locale, key, vars);
 // ?ns=… gives a board its own storage. Tests use it; so can a scratch board.
 const NS = new URLSearchParams(location.search).get('ns');
 const KUIPER = new URLSearchParams(location.search).has('kuiper');
-const KUIPER_BOARD = new URLSearchParams(location.search).get('board') || 'hub-delivery';
+function kuiperBoardSlugFromUrl() {
+  return new URLSearchParams(location.search).get('board') || 'hub-delivery';
+}
+const KUIPER_BOARD = kuiperBoardSlugFromUrl();
 const KUIPER_PREFS_KEY = 'board.kuiper.prefs';
 
 function loadKuiperPrefs() {
@@ -132,7 +135,7 @@ async function kuiperBackfillTaskIssueFields(boardState) {
   const needs = tasks.some(t => t.issueType == null);
   if (!needs) return;
   try {
-    const snap = await KuiperStore.loadBoardSnapshot(KUIPER_BOARD);
+    const snap = await KuiperStore.loadBoardSnapshot(kuiperBoardSlugFromUrl());
     const cards = snap?.cards || [];
     if (!cards.length) return;
     const byId = new Map(cards.map(c => [c.id, c]));
@@ -154,11 +157,37 @@ async function kuiperBackfillTaskIssueFields(boardState) {
   }
 }
 
+function resetKuiperOrgContext(org) {
+  if (!org) return;
+  const now = Date.now();
+  state = C.migrate({
+    columns: [{ id: 'kuiper-empty-col', name: '—', order: 0, mt: now }],
+    tasks: [],
+    projects: [],
+    epics: [],
+    sprints: [],
+    events: [],
+    columnsMt: now,
+    projectsMt: now,
+    epicsMt: now,
+    sprintsMt: now,
+    _kuiper: {
+      organization: { id: org.id, slug: org.slug, name: org.name },
+      boardSlug: null,
+      boardName: null,
+    },
+  });
+  lastStamped = clone(state);
+}
+
 async function loadKuiperBoard() {
   if (!KUIPER || typeof KuiperStore === 'undefined') return;
   const prefs = loadKuiperPrefs();
-  const data = await KuiperStore.loadBoard(KUIPER_BOARD);
+  const data = await KuiperStore.loadBoard(kuiperBoardSlugFromUrl());
   state = C.migrate(data);
+  if (state.columns?.length) {
+    state.columns.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  }
   await kuiperBackfillTaskIssueFields(state);
   if (prefs.groupBy) state.groupBy = prefs.groupBy;
   if (prefs.sortBy) state.sortBy = prefs.sortBy;
@@ -1463,7 +1492,7 @@ function appendColumn(parent, col, items, { lane = null, showPhantom = false } =
       <span class="grow"></span>
       <button class="grab" title="${tr('reorder')}">${ICON.grip}</button>
       <button class="icon sm" data-add title="${tr('newTask')}">${ICON.plus}</button>
-      ${total === 0 && state.columns.length > 1 ? `<button class="icon sm" data-del title="${tr('delete')} ${tr('task')}">${ICON.close}</button>` : ''}
+      ${!KUIPER && total === 0 && state.columns.length > 1 ? `<button class="icon sm" data-del title="${tr('delete')} ${tr('stage')}">${ICON.close}</button>` : ''}
     </div>
     <div class="col-body"></div>`;
 
@@ -2299,7 +2328,30 @@ function dragColumn(ev, srcCol) {
     // order decides which stage is done, so a reorder must be undoable.
     if (order.join() !== was) snapshot();
     state.columns.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
-    if (state.columns.map(x => x.id).join() !== was) save();
+    const changed = state.columns.map(x => x.id).join() !== was;
+    if (changed) {
+      if (KUIPER && typeof KuiperStore !== 'undefined') {
+        const slug = kuiperBoardSlugFromUrl();
+        const orderIds = state.columns.map(c => c.id);
+        KuiperStore.reorderStages(slug, orderIds)
+          .then(() => {
+            C.stampChanges(lastStamped, state);
+            lastStamped = clone(state);
+            KuiperWorkspaceAdmin?.onBoardStagesChanged?.(slug);
+          })
+          .catch(err => {
+            console.warn('kuiper stage reorder failed —', err);
+            toast(
+              locale === 'es' ? 'No se pudo guardar el orden de etapas' : 'Could not save stage order',
+              null,
+              5000,
+            );
+            refreshKuiperBoard();
+          });
+      } else {
+        save();
+      }
+    }
 
     // render() rebuilds the board, so the element we dragged is gone after this;
     // the ghost flies to wherever the freshly rendered column actually landed.
@@ -3942,12 +3994,15 @@ if (KUIPER) {
         save();
         render();
       },
+      loadKuiperBoard,
+      resetOrgContext: resetKuiperOrgContext,
     };
     KuiperUI.init(kuiperHooks);
     if (typeof KuiperWorkspaceAdmin !== 'undefined') {
       KuiperWorkspaceAdmin.init({
         ...kuiperHooks,
         loadKuiperBoard,
+        resetOrgContext: resetKuiperOrgContext,
         enterWorkspace: tab => KuiperUI.enterWorkspace(tab),
         exitWorkspace: () => KuiperUI.exitWorkspace(),
       });
@@ -3966,14 +4021,20 @@ if (KUIPER) {
   refreshBtn.onclick = () => refreshKuiperBoard();
   const tools = document.querySelector('.tools');
   if (tools) tools.insertBefore(refreshBtn, tools.firstChild);
-  loadKuiperBoard().then(() => {
-    render();
-    if (typeof KuiperUI !== 'undefined') KuiperUI.openCardFromUrl();
-  }).catch(err => {
-    console.warn('kuiper load failed —', err);
-    toast(tr('boardLoadFailed'), null, 8000);
-    render();
-  });
+  (async () => {
+    try {
+      if (typeof KuiperUI !== 'undefined' && KuiperUI.ensureOrgInUrl) {
+        await KuiperUI.ensureOrgInUrl();
+      }
+      await loadKuiperBoard();
+      render();
+      if (typeof KuiperUI !== 'undefined') KuiperUI.openCardFromUrl();
+    } catch (err) {
+      console.warn('kuiper load failed —', err);
+      toast(tr('boardLoadFailed'), null, 8000);
+      render();
+    }
+  })();
 } else {
   render();
 }

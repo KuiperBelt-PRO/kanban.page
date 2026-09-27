@@ -58,6 +58,17 @@ function listByOrg(db, { organization_id, organization_slug }) {
     orgId = org ? org.id : null;
   }
   if (!orgId) return [];
+  return db.prepare('SELECT * FROM projects WHERE organization_id = ? AND archived = 0 ORDER BY name COLLATE NOCASE')
+    .all(orgId);
+}
+
+function listByOrgAdmin(db, { organization_id, organization_slug }) {
+  let orgId = organization_id;
+  if (!orgId && organization_slug) {
+    const org = orgs.getBySlug(db, organization_slug);
+    orgId = org ? org.id : null;
+  }
+  if (!orgId) return [];
   return db.prepare('SELECT * FROM projects WHERE organization_id = ? ORDER BY name COLLATE NOCASE')
     .all(orgId);
 }
@@ -81,11 +92,12 @@ function update(db, id, fields) {
   const name = fields.name != null ? fields.name : project.name;
   const description = fields.description !== undefined ? fields.description : project.description;
   const color = fields.color !== undefined ? fields.color : project.color;
+  const archived = fields.archived != null ? (fields.archived ? 1 : 0) : project.archived;
   const ts = nowIso();
   db.prepare(`
-    UPDATE projects SET name = ?, description = ?, color = ?, updated_at = ?
+    UPDATE projects SET name = ?, description = ?, color = ?, archived = ?, updated_at = ?
     WHERE id = ?
-  `).run(name, description, color, ts, id);
+  `).run(name, description, color, archived, ts, id);
   return getById(db, id);
 }
 
@@ -103,5 +115,5 @@ function remove(db, id) {
 }
 
 module.exports = {
-  create, getById, getByOrgSlug, listByOrg, linkRepo, listRepos, ensureCode, update, remove,
+  create, getById, getByOrgSlug, listByOrg, listByOrgAdmin, linkRepo, listRepos, ensureCode, update, remove,
 };

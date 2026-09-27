@@ -111,7 +111,7 @@ Ampliar `/api/v1` (JSON, mismos CORS que hoy). Patrón: validar org/tablero por 
 | POST | `/boards/:slug/stages` | Nueva etapa al final |
 | PATCH | `/boards/:slug/stages/:id` | Renombrar |
 | PATCH | `/boards/:slug/stages/reorder` | Body `{ order: [stage_id, …] }` |
-| DELETE | `/boards/:slug/stages/:id` | Solo si columna vacía |
+| DELETE | `/boards/:slug/stages/:id` | Mueve tarjetas no archivadas a la **etapa anterior** (por `position`); si es la primera, a la **siguiente**. Respuesta: `moved_cards`, `moved_to_stage_id`. |
 
 ### 4.5 Épicas
 
@@ -147,7 +147,7 @@ Tras mutaciones que afecten al tablero abierto: respuesta incluye `board_version
 
 | Pestaña | Contenido |
 | --- | --- |
-| **Tablero** | Nombre tablero; etapas (reordenar, renombrar, añadir); proyectos enlazados al tablero |
+| **Tableros** | Crear tablero (solo nombre); listado; al **seleccionar** uno: nombre, etapas y proyectos de la org con **checkbox**; botón «Abrir» para navegar al tablero |
 | **Proyectos** | Todos los de la org; crear; color; código readonly; contador tarjetas |
 | **Épicas** | Selector de proyecto → lista épicas; crear/editar/archivar |
 | **Tags** | Tags del tablero actual; crear, renombrar, eliminar |
@@ -157,7 +157,7 @@ Tras mutaciones que afecten al tablero abierto: respuesta incluye `board_version
 flowchart LR
   Side[Workspace sidebar]
   Side -->|Administrar| Sheet[Sheet administración]
-  Sheet --> T1[Tablero]
+  Sheet --> T1[Tableros]
   Sheet --> T2[Proyectos]
   Sheet --> T3[Épicas]
   Sheet --> T4[Tags]
@@ -179,7 +179,7 @@ flowchart LR
 1. Lista vertical ordenada; asa drag para reordenar (actualiza `position`).
 2. Inline rename on blur.
 3. `+ Etapa` al final.
-4. No eliminar etapa con tarjetas (deshabilitar + tooltip).
+4. Eliminar etapa con tarjetas: mover tarjetas a la **etapa anterior** (por `position`); si se borra la primera, a la **siguiente**.
 
 ### 5.5 Tablero — proyectos en tablero
 
@@ -223,7 +223,8 @@ flowchart LR
 | Caso | Comportamiento |
 | --- | --- |
 | Slug duplicado | 409; mensaje inline |
-| Última etapa | No eliminar |
+| Última etapa | No eliminar (debe quedar al menos una) |
+| Etapa con tarjetas | Reasignar a etapa anterior (o siguiente si es la primera) y luego borrar etapa |
 | Desenlazar proyecto con tarjetas | Bloquear o exigir mover tarjetas (v1: **bloquear**) |
 | API caída | Toast `workspaceAdminFailed`; sheet en solo lectura |
 | Usuario en vista Gantt/Calendar | Mismas reglas de refresh de `state.tasks` |

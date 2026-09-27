@@ -106,13 +106,45 @@ const KuiperStore = (() => {
     });
   }
 
-  async function listOrgProjects(orgSlug) {
-    const data = await request(`/api/v1/organizations/${encodeURIComponent(orgSlug)}/projects`);
+  async function listOrganizations({ includeArchived = false } = {}) {
+    const q = includeArchived ? '?include_archived=1' : '';
+    const data = await request(`/api/v1/organizations${q}`);
+    return data.organizations || [];
+  }
+
+  async function deleteOrganization(orgSlug) {
+    return request(`/api/v1/organizations/${encodeURIComponent(orgSlug)}`, { method: 'DELETE' });
+  }
+
+  async function deleteBoard(slug) {
+    return request(`/api/v1/boards/${encodeURIComponent(slug)}`, { method: 'DELETE' });
+  }
+
+  async function createOrganization(body) {
+    const data = await request('/api/v1/organizations', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+    return data.organization;
+  }
+
+  async function patchOrganization(orgSlug, body) {
+    const data = await request(`/api/v1/organizations/${encodeURIComponent(orgSlug)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    });
+    return data.organization;
+  }
+
+  async function listOrgProjects(orgSlug, { includeArchived = false } = {}) {
+    const q = includeArchived ? '?include_archived=1' : '';
+    const data = await request(`/api/v1/organizations/${encodeURIComponent(orgSlug)}/projects${q}`);
     return data.projects || [];
   }
 
-  async function listOrgBoards(orgSlug) {
-    const data = await request(`/api/v1/organizations/${encodeURIComponent(orgSlug)}/boards`);
+  async function listOrgBoards(orgSlug, { includeArchived = false } = {}) {
+    const q = includeArchived ? '?include_archived=1' : '';
+    const data = await request(`/api/v1/organizations/${encodeURIComponent(orgSlug)}/boards${q}`);
     return data.boards || [];
   }
 
@@ -188,6 +220,14 @@ const KuiperStore = (() => {
     return request(`/api/v1/boards/${encodeURIComponent(slug)}/stages/${encodeURIComponent(stageId)}`, {
       method: 'DELETE',
     });
+  }
+
+  async function reorderStages(slug, order) {
+    const data = await request(`/api/v1/boards/${encodeURIComponent(slug)}/stages/reorder`, {
+      method: 'PATCH',
+      body: JSON.stringify({ order }),
+    });
+    return data.stages || [];
   }
 
   async function listProjectEpics(projectId) {
@@ -269,6 +309,11 @@ const KuiperStore = (() => {
     loadBoard,
     loadBoardSnapshot,
     loadNavigation,
+    listOrganizations,
+    createOrganization,
+    patchOrganization,
+    deleteOrganization,
+    deleteBoard,
     patchCard,
     createCard,
     listOrgProjects,
@@ -284,6 +329,7 @@ const KuiperStore = (() => {
     createStage,
     updateStage,
     deleteStage,
+    reorderStages,
     listProjectEpics,
     createEpic,
     patchEpic,

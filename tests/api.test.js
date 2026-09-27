@@ -364,4 +364,74 @@ describe('api', () => {
     assert.equal(subAfterEpic.epicId, nextEpicId);
     assert.equal(subAfterEpic.sprintId, sprintId);
   });
+
+  it('archives organization without boards and deletes when empty', async () => {
+    const created = await request('POST', '/api/v1/organizations', { name: 'Archive Me Org' });
+    assert.equal(created.status, 201);
+    const slug = created.body.data.organization.slug;
+    const patch = await request('PATCH', `/api/v1/organizations/${encodeURIComponent(slug)}`, { archived: true });
+    assert.equal(patch.status, 200);
+    assert.ok(patch.body.data.organization.archived);
+    const listActive = await get('/api/v1/organizations');
+    assert.ok(!listActive.body.data.organizations.some(o => o.slug === slug));
+    const listAll = await get('/api/v1/organizations?include_archived=1');
+    assert.ok(listAll.body.data.organizations.some(o => o.slug === slug));
+    const del = await request('DELETE', `/api/v1/organizations/${encodeURIComponent(slug)}`);
+    assert.equal(del.status, 200);
+  });
+
+  it('creates organization via POST', async () => {
+    const res = await request('POST', '/api/v1/organizations', { name: 'Test Org UI' });
+    assert.equal(res.status, 201);
+    assert.equal(res.body.data.organization.name, 'Test Org UI');
+    assert.ok(res.body.data.organization.slug);
+    const list = await get('/api/v1/organizations');
+    assert.ok(list.body.data.organizations.some(o => o.slug === res.body.data.organization.slug));
+  });
+
+  it('reorders board stages via PATCH', async () => {
+    const mem = await get('/api/v1/boards/hub-delivery/membership');
+    assert.equal(mem.status, 200);
+    const stages = mem.body.data.stages;
+    assert.ok(stages.length >= 2);
+    const reversed = [...stages].reverse().map(s => s.id);
+    const res = await request('PATCH', '/api/v1/boards/hub-delivery/stages/reorder', { order: reversed });
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    const after = await get('/api/v1/boards/hub-delivery/membership');
+    assert.deepEqual(after.body.data.stages.map(s => s.id), reversed);
+    await request('PATCH', '/api/v1/boards/hub-delivery/stages/reorder', {
+      order: stages.map(s => s.id),
+    });
+  });
+
+  it('delete stage moves cards to previous stage', async () => {
+    const mem = await get('/api/v1/boards/hub-delivery/membership');
+    assert.equal(mem.status, 200);
+    const stages = mem.body.data.stages;
+    assert.ok(stages.length >= 2);
+    const board = await get('/api/v1/boards/hub-delivery/state');
+    const created = await request('POST', '/api/v1/boards/hub-delivery/stages', { name: 'WS delete test' });
+    assert.equal(created.status, 201);
+    const extraId = created.body.data.stage.id;
+    const memAfter = await get('/api/v1/boards/hub-delivery/membership');
+    const list = memAfter.body.data.stages;
+    const extraIdx = list.findIndex(s => s.id === extraId);
+    assert.ok(extraIdx > 0);
+    const prevStage = list[extraIdx - 1];
+    const card = await request('POST', '/api/v1/cards', {
+      board_slug: 'hub-delivery',
+      project_id: board.body.data.projects[0].id,
+      stage_id: extraId,
+      title: 'Card on doomed stage',
+    });
+    assert.equal(card.status, 201);
+    const cardId = card.body.data.card.id;
+    const del = await request('DELETE', `/api/v1/boards/hub-delivery/stages/${encodeURIComponent(extraId)}`);
+    assert.equal(del.status, 200);
+    assert.equal(del.body.data.moved_cards, 1);
+    assert.equal(del.body.data.moved_to_stage_id, prevStage.id);
+    const state = await get('/api/v1/boards/hub-delivery/state');
+    const task = state.body.data.tasks.find(t => t.id === cardId);
+    assert.equal(task.columnId, prevStage.id);
+  });
 });

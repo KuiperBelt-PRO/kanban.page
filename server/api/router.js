@@ -22,6 +22,10 @@ function badRequest(res, message) {
   sendJson(res, 400, { ok: false, error: { code: 'validation', message } });
 }
 
+function conflict(res, message) {
+  sendJson(res, 409, { ok: false, error: { code: 'conflict', message } });
+}
+
 async function handleApi(req, res, db, urlPath, method) {
   cors(req, res);
   if (method === 'OPTIONS') {
@@ -35,7 +39,22 @@ async function handleApi(req, res, db, urlPath, method) {
   }
 
   if (urlPath === '/api/v1/organizations' && method === 'GET') {
-    return sendJson(res, 200, { ok: true, data: { organizations: orgs.list(db) } });
+    const q = new URL(req.url || '', 'http://localhost').searchParams;
+    const includeArchived = q.get('include_archived') === '1';
+    return sendJson(res, 200, { ok: true, data: { organizations: orgs.list(db, { includeArchived }) } });
+  }
+
+  if (urlPath === '/api/v1/organizations' && method === 'POST') {
+    try {
+      const body = await readBody(req);
+      const name = body?.name != null ? String(body.name).trim() : '';
+      if (!name) return badRequest(res, 'organization name required');
+      const org = orgs.create(db, { name, slug: body.slug });
+      return sendJson(res, 201, { ok: true, data: { organization: org } });
+    } catch (err) {
+      if (String(err.message).includes('UNIQUE')) return conflict(res, err.message);
+      return badRequest(res, err.message);
+    }
   }
 
   if (urlPath === '/api/v1/navigation' && method === 'GET') {
@@ -273,7 +292,7 @@ const STATIC_ROOT = path.join(__dirname, '..', '..');
 const STATIC_FILES = new Set([
   'index.html', 'app.js', 'core.js', 'i18n.js', 'styles.css',
   'kuiper-store.js', 'kuiper-datetime-picker.js', 'kuiper-issue-panel.js', 'kuiper-ui.js',
-  'kuiper-calendar.js', 'kuiper-list.js', 'kuiper-gantt.js', 'kuiper-workspace-admin.js', 'tooltip.js',
+  'kuiper-calendar.js', 'kuiper-list.js', 'kuiper-gantt.js', 'kuiper-confirm.js', 'kuiper-workspace-admin.js', 'tooltip.js',
   'manifest.webmanifest', 'sw.js', 'qr.js',
 ]);
 

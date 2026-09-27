@@ -17,7 +17,11 @@ async function handleWorkspaceRoutes(req, res, db, urlPath, method, { badRequest
   if (orgProjects && method === 'GET') {
     const org = orgs.getBySlug(db, decodeURIComponent(orgProjects[1]));
     if (!org) return notFound(res);
-    return sendJson(res, 200, { ok: true, data: { projects: projects.listByOrg(db, { organization_id: org.id }) } });
+    const q = new URL(req.url || '', 'http://localhost').searchParams;
+    const rows = q.get('include_archived') === '1'
+      ? projects.listByOrgAdmin(db, { organization_id: org.id })
+      : projects.listByOrg(db, { organization_id: org.id });
+    return sendJson(res, 200, { ok: true, data: { projects: rows } });
   }
   if (orgProjects && method === 'POST') {
     try {
@@ -66,7 +70,11 @@ async function handleWorkspaceRoutes(req, res, db, urlPath, method, { badRequest
   if (orgBoards && method === 'GET') {
     const org = orgs.getBySlug(db, decodeURIComponent(orgBoards[1]));
     if (!org) return notFound(res);
-    const rows = boards.list(db, { organization_id: org.id }).map(b => ({
+    const q = new URL(req.url || '', 'http://localhost').searchParams;
+    const raw = q.get('include_archived') === '1'
+      ? boards.listForOrgAdmin(db, { organization_id: org.id })
+      : boards.list(db, { organization_id: org.id });
+    const rows = raw.map(b => ({
       ...b,
       project_ids: boards.listProjects(db, b.id).map(p => p.id),
     }));
@@ -91,8 +99,19 @@ async function handleWorkspaceRoutes(req, res, db, urlPath, method, { badRequest
   if (orgPatch && method === 'PATCH') {
     try {
       const body = await readBody(req);
-      const org = orgs.update(db, decodeURIComponent(orgPatch[1]), { name: body.name });
+      const org = orgs.update(db, decodeURIComponent(orgPatch[1]), {
+        name: body.name,
+        archived: body.archived,
+      });
       return sendJson(res, 200, { ok: true, data: { organization: org } });
+    } catch (err) {
+      return badRequest(res, err.message);
+    }
+  }
+  if (orgPatch && method === 'DELETE') {
+    try {
+      const data = orgs.remove(db, decodeURIComponent(orgPatch[1]));
+      return sendJson(res, 200, { ok: true, data });
     } catch (err) {
       return badRequest(res, err.message);
     }
@@ -170,8 +189,21 @@ async function handleWorkspaceRoutes(req, res, db, urlPath, method, { badRequest
       const board = boards.resolveBoard(db, decodeURIComponent(boardPatch[1]));
       if (!board) return notFound(res);
       const body = await readBody(req);
-      const updated = boards.updateBoard(db, board.id, { name: body.name });
+      const updated = boards.updateBoard(db, board.id, {
+        name: body.name,
+        archived: body.archived,
+      });
       return sendJson(res, 200, { ok: true, data: { board: updated } });
+    } catch (err) {
+      return badRequest(res, err.message);
+    }
+  }
+  if (boardPatch && method === 'DELETE') {
+    try {
+      const board = boards.resolveBoard(db, decodeURIComponent(boardPatch[1]));
+      if (!board) return notFound(res);
+      const data = boards.removeBoard(db, board.id);
+      return sendJson(res, 200, { ok: true, data });
     } catch (err) {
       return badRequest(res, err.message);
     }

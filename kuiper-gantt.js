@@ -585,9 +585,43 @@ const KuiperGantt = (() => {
     return num;
   }
 
+  /** gantt-renderer solo admite hijos bajo `kind: project` (no bajo task/milestone). */
+  function pushCardAsParentProject(tasks, t, parentId, today, subs) {
+    const p = KuiperUI.projectOf(t);
+    const num = allocId(`card:${t.id}`, p?.color);
+    const expandKey = `card:${t.id}:subtasks`;
+    const scheduledList = [t, ...subs].filter(isScheduled);
+    const bounds = BoardCore.scheduleBoundsForTasks(scheduledList);
+    const parent = parentId || undefined;
+    const start = bounds?.start || today;
+    const end = bounds?.end || today;
+    tasks.push({
+      id: num,
+      kind: 'project',
+      text: t.title,
+      parent,
+      startDate: start,
+      endDate: end,
+      open: openState(expandKey),
+      readonly: false,
+      color: p?.color,
+      data: {
+        cardId: t.id,
+        expandKey,
+        rowKind: 'parent',
+        unscheduled: !bounds,
+        summaryOnly: !bounds,
+      },
+    });
+    return num;
+  }
+
   function pushCardWithSubtasks(tasks, t, parentId, today) {
-    const num = pushCardTask(tasks, t, parentId, today);
-    for (const sub of KuiperUI.sortTasks(KuiperUI.subtasksOf(t.id))) {
+    const subs = KuiperUI.sortTasks(KuiperUI.subtasksOf(t.id));
+    const num = subs.length
+      ? pushCardAsParentProject(tasks, t, parentId, today, subs)
+      : pushCardTask(tasks, t, parentId, today);
+    for (const sub of subs) {
       pushCardTask(tasks, sub, num, today);
     }
   }
@@ -735,6 +769,15 @@ const KuiperGantt = (() => {
           `.kuiper-gantt-v2 [data-pane="left"] .gantt-row[data-task-id="${num}"]{`
           + `background:color-mix(in srgb,var(--raise) 45%,var(--surface))!important;`
           + `font-size:10px;font-weight:500;`
+          + `}`,
+        );
+      } else if (kind === 'parent') {
+        const c = color || 'var(--faint)';
+        rules.push(
+          `.kuiper-gantt-v2 [data-pane="left"] .gantt-row[data-task-id="${num}"]{`
+          + `background:color-mix(in srgb,${c} 8%,var(--surface))!important;`
+          + `box-shadow:inset 3px 0 0 color-mix(in srgb,${c} 55%,transparent)!important;`
+          + `font-weight:500;`
           + `}`,
         );
       }

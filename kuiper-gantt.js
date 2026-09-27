@@ -86,13 +86,13 @@ const KuiperGantt = (() => {
       if (ctx.copyText) {
         const ok = await ctx.copyText(url);
         if (ok) ctx.toast?.(tr('linkCopied'));
-        else ctx.toast?.(tr('couldNotCopy'));
+        else ctx.toast?.(tr('couldNotCopy'), null, undefined, 'error');
         return;
       }
       await navigator.clipboard.writeText(url);
       ctx.toast?.(tr('linkCopied'));
     } catch (e) {
-      ctx.toast?.(tr('couldNotCopy'));
+      ctx.toast?.(tr('couldNotCopy'), null, undefined, 'error');
     }
   }
 
@@ -481,7 +481,7 @@ const KuiperGantt = (() => {
         if (seq !== persistSeq) return;
         KuiperUI.applySchedulePatchesLocal(rollback);
         refreshChartDataLight({ scroll });
-        ctx.toast?.(tr('scheduleSaveFailed'));
+        ctx.toast?.(tr('scheduleSaveFailed'), null, undefined, 'error');
       }
     })();
   }
@@ -1021,7 +1021,7 @@ const KuiperGantt = (() => {
   function applyScheduleRange(cardId, start, end) {
     const v = BoardCore.validateSchedule(start, end);
     if (!v.ok) {
-      ctx.toast?.(tr('scheduleSaveFailed'));
+      ctx.toast?.(tr('scheduleSaveFailed'), null, undefined, 'error');
       return;
     }
     timelineRangePick = null;
@@ -1059,10 +1059,10 @@ const KuiperGantt = (() => {
   function patchScheduleField(cardId, field, ymd) {
     const result = schedulePatchesForDateEdit(cardId, field, ymd);
     if (!result) {
-      ctx.toast?.(tr('scheduleSaveFailed'));
+      ctx.toast?.(tr('scheduleSaveFailed'), null, undefined, 'error');
       return;
     }
-    if (result.cycle) ctx.toast?.(tr('ganttCycleWarning'));
+    if (result.cycle) ctx.toast?.(tr('ganttCycleWarning'), null, 7000, 'warning');
     persistPatches(result.patches);
   }
 
@@ -1256,7 +1256,7 @@ const KuiperGantt = (() => {
           await scheduleAtClick(cardId, day);
         } else {
           timelineRangePick = { cardId, day };
-          ctx.toast?.(tr('ganttPickEndDate'));
+          ctx.toast?.(tr('ganttPickEndDate'), null, undefined, 'warning');
         }
         return;
       }
@@ -1267,7 +1267,7 @@ const KuiperGantt = (() => {
           await applyScheduleRange(cardId, a <= b ? a : b, a <= b ? b : a);
         } else {
           timelineRangePick = { cardId, day };
-          ctx.toast?.(tr('ganttPickEndDate'));
+          ctx.toast?.(tr('ganttPickEndDate'), null, undefined, 'warning');
         }
       }
     });
@@ -1594,7 +1594,7 @@ const KuiperGantt = (() => {
         const st = ctx.state?.();
         const graph = BoardCore.buildBlockingGraph(st.tasks || []);
         const result = BoardCore.cascadeScheduleMove(st.tasks || [], graph, cardId, delta);
-        if (result.cycle) ctx.toast?.(tr('ganttCycleWarning'));
+        if (result.cycle) ctx.toast?.(tr('ganttCycleWarning'), null, 7000, 'warning');
         persistPatches(result.patches);
         return true;
       },
@@ -1617,7 +1617,7 @@ const KuiperGantt = (() => {
           const st = ctx.state?.();
           const graph = BoardCore.buildBlockingGraph(st.tasks || []);
           const result = BoardCore.cascadeEndResize(st.tasks || [], graph, cardId, e);
-          if (result.cycle) ctx.toast?.(tr('ganttCycleWarning'));
+          if (result.cycle) ctx.toast?.(tr('ganttCycleWarning'), null, 7000, 'warning');
           persistPatches(result.patches);
           return true;
         }

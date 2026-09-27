@@ -284,7 +284,7 @@ const KuiperUI = (() => {
     const url = cardLinkUrl(id);
     const ok = await ctx.copyText?.(url);
     if (ok) ctx.toast?.(tr('linkCopied'));
-    else ctx.toast?.(tr('couldNotCopy'));
+    else ctx.toast?.(tr('couldNotCopy'), null, undefined, 'error');
   }
 
   function cardIdButtonHtml(id) {
@@ -501,7 +501,7 @@ const KuiperUI = (() => {
   function openSideQuickPanel(mode) {
     const org = currentOrgSlug();
     if (!org) {
-      ctx.toast?.(tr('workspaceAdminNeedsOrg'));
+      ctx.toast?.(tr('workspaceAdminNeedsOrg'), null, undefined, 'warning');
       return;
     }
     sideQuickMode = mode;
@@ -522,7 +522,7 @@ const KuiperUI = (() => {
     if (!name || !sideQuickMode) return;
     const org = currentOrgSlug();
     if (!org) {
-      ctx.toast?.(tr('workspaceAdminNeedsOrg'));
+      ctx.toast?.(tr('workspaceAdminNeedsOrg'), null, undefined, 'warning');
       return;
     }
     const mode = sideQuickMode;
@@ -547,7 +547,7 @@ const KuiperUI = (() => {
         refreshFilters?.();
       }
     } catch (err) {
-      ctx.toast?.(err.message);
+      ctx.toast?.(err.message, null, 8000, 'error');
     }
   }
 
@@ -665,7 +665,7 @@ const KuiperUI = (() => {
         ? KuiperWorkspaceAdmin
         : (typeof window !== 'undefined' ? window.KuiperWorkspaceAdmin : undefined);
       if (!Admin?.open) {
-        ctx.toast?.(tr('workspaceAdminScriptMissing'), null, 10000);
+        ctx.toast?.(tr('workspaceAdminScriptMissing'), null, 10000, 'error');
         console.warn('kuiper-workspace-admin.js no cargó — reinicia kanban serve y recarga (Ctrl+Shift+R)');
         return;
       }
@@ -809,7 +809,7 @@ const KuiperUI = (() => {
   function enterWorkspace(nextTab) {
     const org = currentOrgSlug() || new URLSearchParams(location.search).get('org');
     if (!org) {
-      ctx.toast?.(tr('workspaceAdminNeedsOrg'));
+      ctx.toast?.(tr('workspaceAdminNeedsOrg'), null, undefined, 'warning');
       return;
     }
     const u = new URL(location.href);
@@ -1413,7 +1413,7 @@ const KuiperUI = (() => {
     } catch (err) {
       applySchedulePatchesLocal(rollback);
       if (!silent) ctx.renderBoard?.();
-      ctx.toast?.(tr('scheduleSaveFailed'));
+      ctx.toast?.(tr('scheduleSaveFailed'), null, undefined, 'error');
       throw err;
     }
   }
@@ -2434,7 +2434,7 @@ const KuiperUI = (() => {
       if (typeof KuiperIssuePanel !== 'undefined') KuiperIssuePanel.refreshSubtasksTab?.();
     } catch (err) {
       console.warn('subtask stage change failed', err);
-      ctx.toast?.(tr('scheduleSaveFailed'));
+      ctx.toast?.(tr('scheduleSaveFailed'), null, undefined, 'error');
     }
   }
 
@@ -2466,7 +2466,7 @@ const KuiperUI = (() => {
       if (typeof KuiperIssuePanel !== 'undefined') KuiperIssuePanel.refreshSubtasksTab?.();
     } catch (err) {
       console.warn('subtask stage toggle failed', err);
-      ctx.toast?.(tr('scheduleSaveFailed'));
+      ctx.toast?.(tr('scheduleSaveFailed'), null, undefined, 'error');
     }
   }
 
@@ -2488,7 +2488,7 @@ const KuiperUI = (() => {
       return trimmed;
     } catch (err) {
       console.warn('subtask title save failed', err);
-      ctx.toast?.(tr('scheduleSaveFailed'));
+      ctx.toast?.(tr('scheduleSaveFailed'), null, undefined, 'error');
       return t.title;
     }
   }
@@ -2518,7 +2518,7 @@ const KuiperUI = (() => {
       ctx.renderBoard?.();
     } catch (err) {
       console.warn('subtask create failed', err);
-      ctx.toast?.(tr('scheduleSaveFailed'));
+      ctx.toast?.(tr('scheduleSaveFailed'), null, undefined, 'error');
     }
   }
 

@@ -1111,44 +1111,102 @@ kbd {
 .menu button:hover { color: var(--text); background: var(--raise); }
 .menu hr { border: 0; border-top: 1px solid var(--line); margin: 5px 8px; }
 
-/* ── toast ─────────────────────────────────────────────── */
+/* ── toast stack ───────────────────────────────────────── */
 
-.toast {
+.toast-stack {
   position: fixed;
   z-index: 120;
-  left: 50%;
-  bottom: 24px;
-  transform: translateX(-50%);
+  right: 16px;
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
   display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 9px 10px 9px 16px;
+  flex-direction: column-reverse;
+  align-items: flex-end;
+  gap: 10px;
+  max-width: min(calc(100vw - 24px), 380px);
+  pointer-events: none;
+}
+
+.toast-card {
+  pointer-events: auto;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 10px 10px 12px;
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: 10px;
   box-shadow: var(--sh-2);
-  /* Sync brings the longest strings in the app — a message plus Undo can pass
-     370px, which overflowed a 360px phone. */
-  max-width: min(calc(100vw - 24px), 420px);
-  font: 400 12.5px/1.35 var(--ui);
-  color: var(--muted);
-  animation: toastIn .26s var(--ease) both;
+  font: 400 12.5px/1.4 var(--ui);
+  color: var(--text);
+  animation: toastCardIn .26s var(--ease) both;
+  border-left: 3px solid var(--toast-accent, var(--line-hi));
 }
-@keyframes toastIn { from { opacity: 0; transform: translateX(-50%) translateY(12px) } to { opacity: 1; transform: translateX(-50%) } }
-.toast.out { animation: toastOut .18s ease-in both; }
-@keyframes toastOut { to { opacity: 0; transform: translateX(-50%) translateY(8px) } }
+.toast-card.is-info { --toast-accent: var(--accent-fill); }
+.toast-card.is-warning {
+  --toast-accent: var(--accent-fill);
+  background: color-mix(in srgb, var(--accent-wash) 42%, var(--surface));
+  border-color: color-mix(in srgb, var(--accent-fill) 35%, var(--line));
+}
+.toast-card.is-error {
+  --toast-accent: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 28%, var(--line));
+  background: color-mix(in srgb, var(--danger) 8%, var(--surface));
+}
+.toast-card.out { animation: toastCardOut .18s ease-in both; }
 
-.toast #toast-msg { min-width: 0; }
-.toast button {
+@keyframes toastCardIn {
+  from { opacity: 0; transform: translateY(10px) scale(.98); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes toastCardOut {
+  to { opacity: 0; transform: translateY(6px) scale(.98); }
+}
+
+.toast-card-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.toast-icon {
   flex: none;
-  padding: 5px 12px;
-  border-radius: 999px;
+  margin-top: 1px;
+  color: var(--toast-accent, var(--muted));
+}
+.toast-card.is-info .toast-icon { color: var(--muted); }
+.toast-card-msg { min-width: 0; color: var(--text); }
+
+.toast-card-actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: -2px;
+}
+.toast-action {
+  flex: none;
+  padding: 5px 10px;
+  border-radius: 6px;
   background: var(--raise);
   color: var(--text);
-  font: 500 12px/1 var(--ui);
+  font: 500 11.5px/1 var(--ui);
   transition: background .14s, color .14s;
 }
-.toast button:hover { background: var(--accent-fill); color: var(--accent-ink); }
+.toast-action:hover { background: var(--accent-fill); color: var(--accent-ink); }
+.toast-close {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  color: var(--muted);
+  font: 400 18px/1 var(--ui);
+  transition: background .14s, color .14s;
+}
+.toast-close:hover { background: var(--raise); color: var(--text); }
 
 /* A new worker waits until the person explicitly accepts it, so an update
    never changes the running app underneath an in-progress edit. */
@@ -1623,7 +1681,7 @@ button[disabled] { opacity: .4; pointer-events: none; }
   .kuiper-dt-input { font-size: 16px; }
   .chooser .pill { height: 44px; }
   .menu > button, #languageChoices button, .menu.weeks button { min-height: 44px; }
-  .toast button { min-height: 44px; }
+  .toast-action, .toast-close { min-height: 44px; min-width: 44px; }
 
   /* below 16px iOS zooms the page on focus and never zooms back */
   .prow input, .panel-foot input, .composer textarea, .cmd-input input { font-size: 16px; }
@@ -1645,7 +1703,7 @@ button[disabled] { opacity: .4; pointer-events: none; }
 .panel-body { overscroll-behavior: contain; }
 .panel-foot { padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)); }
 .sheet-foot { padding-bottom: calc(13px + env(safe-area-inset-bottom, 0px)); }
-.toast { bottom: calc(24px + env(safe-area-inset-bottom, 0px)); }
+.toast-stack { bottom: calc(16px + env(safe-area-inset-bottom, 0px)); }
 .rep-body, .menu { overscroll-behavior: contain; }
 
 /* base, not phone-specific: a stage name used to wrap to three lines inside a

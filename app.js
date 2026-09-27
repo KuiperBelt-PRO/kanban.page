@@ -224,6 +224,7 @@ function queueKuiperCardPatch(prev, task) {
         locale === 'es' ? 'No se pudo guardar en el servidor' : 'Could not save to server',
         null,
         5000,
+        'error',
       );
     });
   return kuiperSaveChain;
@@ -249,7 +250,7 @@ function refreshKuiperBoard() {
   if (!KUIPER) return;
   loadKuiperBoard().then(() => render()).catch(err => {
     console.warn('kuiper refresh failed —', err);
-    toast(locale === 'es' ? 'No se pudo refrescar el tablero' : 'Could not refresh board', null, 5000);
+    toast(locale === 'es' ? 'No se pudo refrescar el tablero' : 'Could not refresh board', null, 5000, 'error');
   });
 }
 
@@ -263,7 +264,7 @@ function applyLocale() {
   $('#menuBtn').setAttribute('aria-label', tr('more'));
   $('#updateText').textContent = tr('updateAvailable');
   $('#updateBtn').textContent = tr('update');
-  $('#toast-undo').textContent = tr('undo');
+  KuiperToast?.refreshLabels?.();
   $('#editor').setAttribute('aria-label', tr('task'));
   $('#f-title').placeholder = tr('what');
   $('#f-notes').placeholder = tr('notes');
@@ -329,7 +330,7 @@ function writeStateNow() {
     return true;
   } catch (err) {
     console.warn('board: could not write storage —', err);
-    toast(tr('storageUnavailable'), null, 8000);
+    toast(tr('storageUnavailable'), null, 8000, 'error');
     return false;
   }
 }
@@ -340,7 +341,7 @@ function installLocalState(next) {
     localStorage.setItem(KEY, JSON.stringify(migrated));
   } catch (err) {
     console.warn('board: could not write storage —', err);
-    toast(tr('storageUnavailable'), null, 8000);
+    toast(tr('storageUnavailable'), null, 8000, 'error');
     return false;
   }
   state = migrated;
@@ -1003,7 +1004,7 @@ function syncLost() {
   saveSyncConfig();
   setSyncStatus('gone');
   if (!$('#sync').hidden) { syncView = 'off'; renderSync(); focusSyncState(); }
-  if (!saidSyncLost) { saidSyncLost = true; toast(tr('syncLost'), null, 8000); }
+  if (!saidSyncLost) { saidSyncLost = true; toast(tr('syncLost'), null, 8000, 'error'); }
 }
 
 /** Wipe the relay copy — durable: the slot answers 410 from then on, and
@@ -1902,7 +1903,7 @@ const copyTimers = new WeakMap();
     The wash and the check carry the confirmation instead. */
 async function copyChip(chip, text) {
   const ok = await copyText(text);
-  if (!ok) { toast(tr('couldNotCopy')); return; }
+  if (!ok) { toast(tr('couldNotCopy'), null, undefined, 'error'); return; }
 
   const ci = $('.ci', chip);
   clearTimeout(copyTimers.get(chip));
@@ -2345,6 +2346,7 @@ function dragColumn(ev, srcCol) {
               locale === 'es' ? 'No se pudo guardar el orden de etapas' : 'Could not save stage order',
               null,
               5000,
+              'error',
             );
             refreshKuiperBoard();
           });
@@ -2508,7 +2510,7 @@ function persistEditorDraft({ rerender = true } = {}) {
   if (!pullEditorIntoDraft()) return false;
   if (!draft.title) return false;
   if (KUIPER && typeof BoardCore !== 'undefined' && BoardCore.isSubtask(draft) && !draft.parentId) {
-    toast(tr('parentIssue'));
+    toast(tr('parentIssue'), null, undefined, 'warning');
     return false;
   }
   const t = byId(editing);
@@ -2554,7 +2556,7 @@ function saveEditor() {
   if (!draft.title) { closeEditor(); return; }
 
   if (KUIPER && typeof BoardCore !== 'undefined' && BoardCore.isSubtask(draft) && !draft.parentId) {
-    toast(tr('parentIssue'));
+    toast(tr('parentIssue'), null, undefined, 'warning');
     return;
   }
 
@@ -3206,7 +3208,7 @@ $('#sync-enable').onclick = async () => {
   setSyncStatus('syncing');
   const ok = await enableSync();
   b.disabled = false;
-  if (!ok) { toast(tr('syncFailed')); syncStopped(); renderSync(); return; }
+  if (!ok) { toast(tr('syncFailed'), null, undefined, 'error'); syncStopped(); renderSync(); return; }
   syncView = 'on';
   renderSync();
   focusSyncState();
@@ -3262,7 +3264,7 @@ $('#sync-cancel').onclick = () => {
 $('#sync-copy').onclick = async () => {
   if (!sync) return;
   const ok = await copyText(syncLink());
-  if (!ok) { toast(tr('couldNotCopy')); return; }
+  if (!ok) { toast(tr('couldNotCopy'), null, undefined, 'error'); return; }
   const wrap = $('#sync-url-wrap');
   const btn = $('#sync-copy');
   wrap.classList.add('copied');
@@ -3307,7 +3309,7 @@ $('#sync-end-confirm').onclick = async () => {
     syncView = 'on';
     renderSync();
     focusSyncState();
-    toast(tr('syncDeleteFailed'), null, 8000);
+    toast(tr('syncDeleteFailed'), null, 8000, 'error');
     return;
   }
   closeSync();
@@ -3409,7 +3411,7 @@ $('#importFile').addEventListener('change', async e => {
     render();
     toast(`Imported ${state.tasks.length} tasks`, undo);
   } catch (err) {
-    toast('That file is not a board backup');
+    toast(tr('invalidBackup'), null, undefined, 'error');
   }
   e.target.value = '';
 });
@@ -3510,25 +3512,8 @@ function undo() {
   render();
 }
 
-const toastEl = $('#toast');
-const toastMsg = $('#toast-msg');
-const toastUndo = $('#toast-undo');
-let toastTimer = null;
-
-function toast(msg, action, ms = 5200) {
-  clearTimeout(toastTimer);
-  toastMsg.textContent = msg;
-  toastUndo.hidden = !action;
-  toastUndo.onclick = () => { if (action) action(); hideToast(); };
-  toastEl.classList.remove('out');
-  toastEl.hidden = false;
-  toastTimer = setTimeout(hideToast, ms);
-}
-
-function hideToast() {
-  clearTimeout(toastTimer);
-  toastEl.classList.add('out');
-  setTimeout(() => { toastEl.hidden = true; }, 180);
+function toast(msg, action, ms, type) {
+  return KuiperToast.toast(msg, action, ms, type);
 }
 
 /* ── scrim + keys ──────────────────────────────────────── */
@@ -3841,7 +3826,7 @@ function editDay(row, entry) {
     const conflict = C.rewriteConflict(state.events, entry, day);
     if (conflict) {
       renderReport(false);
-      toast(conflict === 'before' ? 'That is before this card existed' : 'Not a date');
+      toast(conflict === 'before' ? 'That is before this card existed' : 'Not a date', null, undefined, 'warning');
       flushExternal();
       return;
     }
@@ -3885,7 +3870,7 @@ $('#rep-all').onclick = () => {
 
 $('#rep-copy').onclick = async () => {
   const ok = await copyText(reportMarkdown());
-  toast(ok ? tr('reportCopied') : tr('couldNotCopy'));
+  toast(ok ? tr('reportCopied') : tr('couldNotCopy'), null, undefined, ok ? 'info' : 'error');
 };
 
 $('#rep-save').onclick = () => {
@@ -4031,7 +4016,7 @@ if (KUIPER) {
       if (typeof KuiperUI !== 'undefined') KuiperUI.openCardFromUrl();
     } catch (err) {
       console.warn('kuiper load failed —', err);
-      toast(tr('boardLoadFailed'), null, 8000);
+      toast(tr('boardLoadFailed'), null, 8000, 'error');
       render();
     }
   })();

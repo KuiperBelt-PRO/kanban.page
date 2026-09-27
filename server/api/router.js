@@ -292,7 +292,7 @@ const STATIC_ROOT = path.join(__dirname, '..', '..');
 const STATIC_FILES = new Set([
   'index.html', 'app.js', 'core.js', 'i18n.js', 'styles.css',
   'kuiper-store.js', 'kuiper-datetime-picker.js', 'kuiper-issue-panel.js', 'kuiper-ui.js',
-  'kuiper-calendar.js', 'kuiper-list.js', 'kuiper-gantt.js', 'kuiper-confirm.js', 'kuiper-workspace-admin.js', 'tooltip.js',
+  'kuiper-calendar.js', 'kuiper-list.js', 'kuiper-gantt.js', 'kuiper-confirm.js', 'kuiper-toast.js', 'kuiper-workspace-admin.js', 'tooltip.js',
   'manifest.webmanifest', 'sw.js', 'qr.js',
 ]);
 

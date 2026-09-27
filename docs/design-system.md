@@ -2,7 +2,7 @@
 
 Especificación **completa** del sistema de diseño actual. Toda feature UI nueva debe cumplirla. Si algo no está aquí, no está definido — amplía este documento en el mismo PR.
 
-**Fuente de verdad en código:** `styles.css`, `index.html`, `app.js`, `kuiper-ui.js`, `kuiper-issue-panel.js`, `kuiper-datetime-picker.js`, `kuiper-confirm.js`, `tooltip.js`.
+**Fuente de verdad en código:** `styles.css`, `index.html`, `app.js`, `kuiper-ui.js`, `kuiper-issue-panel.js`, `kuiper-datetime-picker.js`, `kuiper-confirm.js`, `kuiper-toast.js`, `tooltip.js`.
 
 | Documento | Rol |
 | --- | --- |
@@ -194,7 +194,7 @@ Toggle: menú `T` o prefs Kuiper. Kuiper local default: **dark** si no hay prefe
 | Seg etapa | `.seg button` | mono | 10.5px 500 | 1 | 0.15em | uppercase |
 | Panel title | `.panel-head h2` | mono | 11px 500 | 1 | 0.19em | uppercase |
 | Menú fila | `.menu button` | ui | 13px 400 | 1 | — | — |
-| Toast | `.toast` | ui | 12.5px 400 | 1.35 | — | — |
+| Toast | `.toast-card` | ui | 12.5px 400 | 1.4 | — | — |
 | Semana informe | `.wk` | mono | 15px 500 | 1.3 | 0.06em | uppercase |
 | Resumen informe | `.rep-sum` | mono | 10.5px 400 | 1 | 0.12em | uppercase |
 | Fila informe título | `.rep-row .rt` | ui | 13.5px 400 | 1.35 | — | — |
@@ -268,7 +268,7 @@ Overlays (sheet / panel) se superponen al board; no reducen su ancho.
 | 90 | `.scrim` |
 | 100 | `.sheet`, `.panel`, `.kuiper-side` |
 | 110 | `.menu` |
-| 120 | `.toast` |
+| 120 | `.toast-stack` |
 | 140 | `.kuiper-delete-dlg` |
 | 12000 | `.kuiper-confirm-scrim` (Manage workspace: archivar / eliminar entidad) |
 | 200 | `.card-ghost-wrap` |
@@ -406,10 +406,13 @@ stateDiagram-v2
 - Labels sección: `.menu-label` mono uppercase.
 - Toggles: `.tick` ámbar visible si `[aria-pressed="true"]` o `aria-checked`.
 
-### 7.9 Toast `.toast`
+### 7.9 Toast `.toast-stack` / `.toast-card`
 
-- Bottom `24px + safe-area`; max-width `min(calc(100vw - 24px), 420px)`.
-- Botón undo: pill `--raise` → hover `--accent-fill`.
+- Contenedor fijo abajo a la derecha: `.toast-stack` (`z-index: 120`), tarjetas apiladas con `column-reverse`.
+- Tipos: `.toast-card.is-info` (borde acento), `.is-warning` (lavado `--accent-wash`), `.is-error` (lavado `--danger`).
+- Cada tarjeta: icono semántico, mensaje, botón **Deshacer** opcional (`.toast-action`) y cierre **×** (`.toast-close`).
+- Auto-cierre por tiempo (API `toast(msg, action?, ms?, type?)`); `ms: 0` o `persist: true` en objeto opciones → solo cierre manual.
+- Módulo: `kuiper-toast.js` (`KuiperToast.toast`).
 
 ### 7.10 Tooltip `.tip-bubble`
 

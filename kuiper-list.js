@@ -447,7 +447,7 @@ const KuiperList = (() => {
     } catch (err) {
       Object.assign(t, snap);
       ctx.renderBoard?.();
-      ctx.toast?.(tr('listSaveFailed'));
+      ctx.toast?.(tr('listSaveFailed'), null, undefined, 'error');
       console.warn('list patch failed', err);
     }
   }
@@ -527,7 +527,7 @@ const KuiperList = (() => {
     const pick = buildFieldPick(task, field);
     if (!pick) return;
     if (pick.disabled) {
-      ctx.toast?.(tr('listFieldNotEditable'));
+      ctx.toast?.(tr('listFieldNotEditable'), null, undefined, 'warning');
       return;
     }
     KuiperUI.openAnchoredPickMenu(
@@ -553,7 +553,7 @@ const KuiperList = (() => {
     } catch (err) {
       t.flag = was;
       ctx.renderBoard?.();
-      ctx.toast?.(tr('listSaveFailed'));
+      ctx.toast?.(tr('listSaveFailed'), null, undefined, 'error');
       console.warn('list flag patch failed', err);
     }
   }

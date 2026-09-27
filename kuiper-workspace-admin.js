@@ -390,7 +390,7 @@ const KuiperWorkspaceAdmin = (() => {
           await afterBoardRemoved(slug);
           await renderBody();
         } catch (err) {
-          ctx.toast?.(err.message);
+          ctx.toast?.(err.message, null, 8000, 'error');
         }
       };
     });
@@ -405,7 +405,7 @@ const KuiperWorkspaceAdmin = (() => {
           ctx.toast?.(tr('restore'));
           await renderBody();
         } catch (err) {
-          ctx.toast?.(err.message);
+          ctx.toast?.(err.message, null, 8000, 'error');
         }
       };
     });
@@ -422,7 +422,7 @@ const KuiperWorkspaceAdmin = (() => {
           await afterBoardRemoved(slug);
           await renderBody();
         } catch (err) {
-          ctx.toast?.(err.message);
+          ctx.toast?.(err.message, null, 8000, 'error');
         }
       };
     });
@@ -432,7 +432,7 @@ const KuiperWorkspaceAdmin = (() => {
     const org = orgSlug();
     const name = root.querySelector('#kuiperWsNewBoardName')?.value.trim();
     if (!name) {
-      ctx.toast?.(tr('workspaceAdminBoardNameRequired'));
+      ctx.toast?.(tr('workspaceAdminBoardNameRequired'), null, undefined, 'warning');
       return;
     }
     try {
@@ -450,7 +450,7 @@ const KuiperWorkspaceAdmin = (() => {
       await activateBoardInPlace(slug);
       await renderBody();
     } catch (err) {
-      ctx.toast?.(err.message);
+      ctx.toast?.(err.message, null, 8000, 'error');
     }
   }
 
@@ -477,7 +477,7 @@ const KuiperWorkspaceAdmin = (() => {
         await KuiperStore.reorderStages(slug, order, boardStoreOpts());
         await afterBoardDetailMutation(slug);
       } catch (err) {
-        ctx.toast?.(err.message);
+        ctx.toast?.(err.message, null, 8000, 'error');
         await refreshBoardsPanels();
       }
     };
@@ -596,7 +596,7 @@ const KuiperWorkspaceAdmin = (() => {
       if (isCurrent) {
         membership = { projects: st?.projects || [], stages: st?.columns || [] };
       } else {
-        ctx.toast?.(err.message);
+        ctx.toast?.(err.message, null, 8000, 'error');
       }
     }
     const orgProjects = await KuiperStore.listOrgProjects(managedOrgSlug || orgSlug()).catch(() => []);
@@ -650,7 +650,7 @@ const KuiperWorkspaceAdmin = (() => {
           await KuiperStore.deleteStage(apiKey, btn.dataset.delStage, bOpts);
           await afterBoardDetailMutation(slug);
         } catch (err) {
-          ctx.toast?.(err.message);
+          ctx.toast?.(err.message, null, 8000, 'error');
         }
       };
     });
@@ -664,7 +664,7 @@ const KuiperWorkspaceAdmin = (() => {
         if (addStageInput) addStageInput.value = '';
         await afterBoardDetailMutation(slug);
       } catch (err) {
-        ctx.toast?.(err.message);
+        ctx.toast?.(err.message, null, 8000, 'error');
       }
     };
     if (addStageBtn) addStageBtn.onclick = () => submitNewStage();
@@ -699,7 +699,7 @@ const KuiperWorkspaceAdmin = (() => {
           else await KuiperStore.unlinkBoardProject(apiKey, cb.dataset.pid, linkOpts);
           await afterBoardDetailMutation(slug);
         } catch (err) {
-          ctx.toast?.(err.message);
+          ctx.toast?.(err.message, null, 8000, 'error');
           cb.checked = !cb.checked;
         }
       };
@@ -802,7 +802,7 @@ const KuiperWorkspaceAdmin = (() => {
           ctx.toast?.(tr('workspaceAdminArchivedToast'));
           await renderBody();
         } catch (err) {
-          ctx.toast?.(err.message);
+          ctx.toast?.(err.message, null, 8000, 'error');
         }
       };
     });
@@ -815,7 +815,7 @@ const KuiperWorkspaceAdmin = (() => {
           ctx.toast?.(tr('restore'));
           await renderBody();
         } catch (err) {
-          ctx.toast?.(err.message);
+          ctx.toast?.(err.message, null, 8000, 'error');
         }
       };
     });
@@ -836,14 +836,14 @@ const KuiperWorkspaceAdmin = (() => {
           ctx.toast?.(tr('workspaceAdminDeletedToast'));
           await renderBody();
         } catch (err) {
-          ctx.toast?.(err.message);
+          ctx.toast?.(err.message, null, 8000, 'error');
         }
       };
     });
     body.querySelector('[data-act="add-org"]').onclick = async () => {
       const name = body.querySelector('#kuiperWsNewOrgName')?.value.trim();
       if (!name) {
-        ctx.toast?.(tr('workspaceAdminOrgNameRequired'));
+        ctx.toast?.(tr('workspaceAdminOrgNameRequired'), null, undefined, 'warning');
         return;
       }
       try {
@@ -853,7 +853,7 @@ const KuiperWorkspaceAdmin = (() => {
         if (typeof KuiperUI !== 'undefined') await KuiperUI.loadNavigation?.();
         await renderBody();
       } catch (err) {
-        ctx.toast?.(err.message);
+        ctx.toast?.(err.message, null, 8000, 'error');
       }
     };
   }
@@ -926,7 +926,7 @@ const KuiperWorkspaceAdmin = (() => {
           await reloadBoard();
           await renderBody();
         } catch (err) {
-          ctx.toast?.(err.message);
+          ctx.toast?.(err.message, null, 8000, 'error');
         }
       };
     });
@@ -939,7 +939,7 @@ const KuiperWorkspaceAdmin = (() => {
           await reloadBoard();
           await renderBody();
         } catch (err) {
-          ctx.toast?.(err.message);
+          ctx.toast?.(err.message, null, 8000, 'error');
         }
       };
     });
@@ -955,7 +955,7 @@ const KuiperWorkspaceAdmin = (() => {
           await reloadBoard();
           await renderBody();
         } catch (err) {
-          ctx.toast?.(err.message);
+          ctx.toast?.(err.message, null, 8000, 'error');
         }
       };
     });
@@ -1054,7 +1054,7 @@ const KuiperWorkspaceAdmin = (() => {
       const sel = body.querySelector('#kuiperWsSprintProj');
       const project_ids = [...sel.selectedOptions].map(o => o.value);
       if (!name || !start || !end || !project_ids.length) {
-        ctx.toast?.(tr('workspaceAdminSprintInvalid'));
+        ctx.toast?.(tr('workspaceAdminSprintInvalid'), null, undefined, 'warning');
         return;
       }
       await KuiperStore.createOrgSprint(orgSlug(), {
@@ -1105,7 +1105,7 @@ const KuiperWorkspaceAdmin = (() => {
       return;
     }
     if (!orgSlug()) {
-      ctx.toast?.(tr('workspaceAdminNeedsOrg'));
+      ctx.toast?.(tr('workspaceAdminNeedsOrg'), null, undefined, 'warning');
       return;
     }
     prepare(nextTab);

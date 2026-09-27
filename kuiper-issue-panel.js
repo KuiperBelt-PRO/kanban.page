@@ -1104,7 +1104,7 @@ const KuiperIssuePanel = (() => {
       ctx.refreshBoard?.();
     } catch (err) {
       console.warn('time entry update failed', err);
-      ctx.toast?.(tr('timeEntrySaveFailed'));
+      ctx.toast?.(tr('timeEntrySaveFailed'), null, undefined, 'error');
       if (saveBtn) saveBtn.disabled = false;
     }
   }
@@ -1117,7 +1117,7 @@ const KuiperIssuePanel = (() => {
       ctx.refreshBoard?.();
     } catch (err) {
       console.warn('time entry delete failed', err);
-      ctx.toast?.(tr('timeEntryDeleteFailed'));
+      ctx.toast?.(tr('timeEntryDeleteFailed'), null, undefined, 'error');
     }
   }
 
@@ -1134,7 +1134,7 @@ const KuiperIssuePanel = (() => {
       await reloadDetail();
     } catch (err) {
       console.warn('comment update failed', err);
-      ctx.toast?.(tr('commentSaveFailed'));
+      ctx.toast?.(tr('commentSaveFailed'), null, undefined, 'error');
       if (saveBtn) saveBtn.disabled = false;
     }
   }

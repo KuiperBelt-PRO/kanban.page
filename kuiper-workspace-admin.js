@@ -7,6 +7,9 @@ const KuiperWorkspaceAdmin = (() => {
   let pendingTab = null;
   /** Tablero cuyo detalle (proyectos, etapas) se muestra en la pestaña unificada */
   let selectedBoardSlug = null;
+  let selectedBoardId = null;
+  /** Org usada al listar tableros en Manage (evita depender solo de la URL) */
+  let managedOrgSlug = '';
 
   function normalizeTab(next) {
     if (next === 'board') return 'boards';
@@ -21,6 +24,12 @@ const KuiperWorkspaceAdmin = (() => {
   function esc(s) {
     return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
   }
+
+  const WS_ICON = {
+    archive: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h10v7.5a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6z"/><path d="M6 6V4.5A1 1 0 0 1 7 3.5h2a1 1 0 0 1 1 1V6"/><path d="M3 6h10"/></svg>',
+    restore: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3v4.5"/><path d="M5.5 5 8 2.5 10.5 5"/><path d="M4 8.5v3a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-3"/></svg>',
+    delete: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 5h9"/><path d="M6 5V3.75A.75.75 0 0 1 6.75 3h2.5a.75.75 0 0 1 .75.75V5"/><path d="M5.25 5l.4 7.2a.75.75 0 0 0 .75.7h3.2a.75.75 0 0 0 .75-.7L10.75 5"/></svg>',
+  };
 
   function archivedFlag(row) {
     return !!(row && (row.archived === true || row.archived === 1));
@@ -52,36 +61,46 @@ const KuiperWorkspaceAdmin = (() => {
 
   async function confirmArchiveEntity(name) {
     const C = typeof KuiperConfirm !== 'undefined' ? KuiperConfirm : null;
-    if (!C) return false;
-    return C.confirmArchive({
-      title: tr('workspaceAdminArchiveTitle', { name }),
-      message: tr('workspaceAdminArchiveMsg', { name }),
-      confirmLabel: tr('archiveVerb'),
-      cancelLabel: tr('cancel'),
-    });
+    if (C) {
+      return C.confirmArchive({
+        title: tr('workspaceAdminArchiveTitle', { name }),
+        message: tr('workspaceAdminArchiveMsg', { name }),
+        confirmLabel: tr('archiveVerb'),
+        cancelLabel: tr('cancel'),
+      });
+    }
+    return window.confirm(`${tr('workspaceAdminArchiveTitle', { name })}\n\n${tr('workspaceAdminArchiveMsg', { name })}`);
   }
 
   async function confirmDeleteEntity(name) {
     const C = typeof KuiperConfirm !== 'undefined' ? KuiperConfirm : null;
-    if (!C) return false;
     const word = tr('deleteConfirmWord');
-    return C.confirmDelete({
-      title: tr('workspaceAdminDeleteTitle', { name }),
-      message: tr('workspaceAdminDeleteMsg', { name }),
-      typeWord: word,
-      confirmLabel: tr('delete'),
-      cancelLabel: tr('cancel'),
-    });
+    if (C) {
+      return C.confirmDelete({
+        title: tr('workspaceAdminDeleteTitle', { name }),
+        message: tr('workspaceAdminDeleteMsg', { name }),
+        typeWord: word,
+        placeholder: tr('deleteConfirmInputPlaceholder', { word }),
+        confirmLabel: tr('delete'),
+        cancelLabel: tr('cancel'),
+      });
+    }
+    const typed = window.prompt(
+      `${tr('workspaceAdminDeleteTitle', { name })}\n${tr('deleteConfirmHint', { word })}`,
+      '',
+    );
+    return typed?.trim().toLowerCase() === word.toLowerCase();
   }
 
   function entityActionButtons({ archived, archiveAct, restoreAct, deleteAct, slugAttr, slug }) {
     const attr = slugAttr ? ` data-${slugAttr}="${esc(slug)}"` : '';
-    const restore = archived
-      ? `<button type="button" class="ghost sm" data-act="${restoreAct}"${attr}>${esc(tr('restore'))}</button>`
-      : `<button type="button" class="ghost sm" data-act="${archiveAct}"${attr}>${esc(tr('archiveVerb'))}</button>`;
+    const archiveLabel = archived ? tr('restore') : tr('archiveVerb');
+    const archiveIcon = archived ? WS_ICON.restore : WS_ICON.archive;
+    const act = archived ? restoreAct : archiveAct;
+    const deleteLabel = tr('delete');
     return `<div class="kuiper-ws-entity-actions">
-      ${restore}
-      <button type="button" class="ghost sm danger" data-act="${deleteAct}"${attr} title="${esc(tr('delete'))}">${esc(tr('delete'))}</button>
+      <button type="button" class="icon sm kuiper-ws-entity-icon" data-act="${act}"${attr} title="${esc(archiveLabel)}" aria-label="${esc(archiveLabel)}">${archiveIcon}</button>
+      <button type="button" class="icon sm kuiper-ws-entity-icon danger" data-act="${deleteAct}"${attr} title="${esc(deleteLabel)}" aria-label="${esc(deleteLabel)}">${WS_ICON.delete}</button>
     </div>`;
   }
 
@@ -93,7 +112,10 @@ const KuiperWorkspaceAdmin = (() => {
       if (next) await activateBoardInPlace(next);
       else ctx.resetOrgContext?.({ slug: org });
     }
-    if (selectedBoardSlug === slug) selectedBoardSlug = null;
+    if (selectedBoardSlug === slug) {
+      selectedBoardSlug = null;
+      selectedBoardId = null;
+    }
     await refreshNavSidebar();
     await reloadBoard();
   }
@@ -102,6 +124,34 @@ const KuiperWorkspaceAdmin = (() => {
     const fromUrl = new URLSearchParams(location.search).get('org');
     if (fromUrl) return fromUrl;
     return ctx.state?.()._kuiper?.organization?.slug || '';
+  }
+
+  function boardStoreOpts() {
+    const org = managedOrgSlug || orgSlug();
+    const stOrg = ctx.state?.()._kuiper?.organization;
+    const opts = {};
+    if (org) opts.org = org;
+    else if (stOrg?.slug) opts.org = stOrg.slug;
+    if (stOrg?.id) opts.organizationId = stOrg.id;
+    return opts;
+  }
+
+  /** Identificador de tablero para la API (id evita slugs duplicados entre orgs). */
+  function boardApiKey(slug = selectedBoardSlug) {
+    if (slug === selectedBoardSlug && selectedBoardId) return selectedBoardId;
+    const st = ctx.state?.()._kuiper;
+    if (slug === boardSlug() && st?.boardId) return st.boardId;
+    return slug;
+  }
+
+  function syncOrgInUrl() {
+    const org = managedOrgSlug || orgSlug();
+    if (!org) return;
+    const u = new URL(location.href);
+    if (u.searchParams.get('org') === org) return;
+    u.searchParams.set('kuiper', '1');
+    u.searchParams.set('org', org);
+    history.replaceState(null, '', `${u.pathname}${u.search}${u.hash}`);
   }
 
   function boardSlug() {
@@ -178,7 +228,12 @@ const KuiperWorkspaceAdmin = (() => {
     const next = normalizeTab(nextTab || tab);
     pendingTab = next;
     tab = next;
+    managedOrgSlug = orgSlug();
     if (!selectedBoardSlug) selectedBoardSlug = boardSlug();
+    const st = ctx.state?.()._kuiper;
+    if (!selectedBoardId && selectedBoardSlug === boardSlug() && st?.boardId) {
+      selectedBoardId = st.boardId;
+    }
   }
 
   function tabButtons() {
@@ -260,8 +315,8 @@ const KuiperWorkspaceAdmin = (() => {
       slugAttr: 'board-slug',
       slug: b.slug,
     });
-    return `<li class="${classes}${isArchived ? ' is-archived-entity' : ''}" data-board-slug="${esc(b.slug)}" data-board-name="${esc(b.name)}">
-      <button type="button" class="kuiper-ws-board-select" data-board-slug="${esc(b.slug)}">
+    return `<li class="${classes}${isArchived ? ' is-archived-entity' : ''}" data-board-id="${esc(b.id)}" data-board-slug="${esc(b.slug)}" data-board-name="${esc(b.name)}">
+      <button type="button" class="kuiper-ws-board-select" data-board-slug="${esc(b.slug)}" data-board-id="${esc(b.id)}">
         <span class="kuiper-ws-board-label">${isSelected ? `<strong>${esc(b.name)}</strong>` : esc(b.name)}</span>
         <span class="faint"> · ${esc(b.slug)}</span>
       </button>
@@ -306,6 +361,7 @@ const KuiperWorkspaceAdmin = (() => {
     root.querySelectorAll('.kuiper-ws-board-select').forEach(btn => {
       btn.onclick = () => {
         selectedBoardSlug = btn.dataset.boardSlug;
+        selectedBoardId = btn.dataset.boardId || btn.closest('.kuiper-ws-board-row')?.dataset.boardId || null;
         withPreservedScroll(async () => {
           syncBoardListSelection();
           const row = btn.closest('.kuiper-ws-board-row');
@@ -325,10 +381,12 @@ const KuiperWorkspaceAdmin = (() => {
       btn.onclick = async () => {
         const slug = btn.dataset.boardSlug;
         const row = btn.closest('.kuiper-ws-board-row');
+        const apiKey = row?.dataset.boardId || boardApiKey(slug);
         const name = row?.dataset.boardName || slug;
         if (!await confirmArchiveEntity(name)) return;
         try {
-          await KuiperStore.patchBoard(slug, { archived: true });
+          await KuiperStore.patchBoard(apiKey, { archived: true }, boardStoreOpts());
+          ctx.toast?.(tr('workspaceAdminArchivedToast'));
           await afterBoardRemoved(slug);
           await renderBody();
         } catch (err) {
@@ -339,9 +397,12 @@ const KuiperWorkspaceAdmin = (() => {
     root.querySelectorAll('[data-act="restore-board"]').forEach(btn => {
       btn.onclick = async () => {
         const slug = btn.dataset.boardSlug;
+        const row = btn.closest('.kuiper-ws-board-row');
+        const apiKey = row?.dataset.boardId || boardApiKey(slug);
         try {
-          await KuiperStore.patchBoard(slug, { archived: false });
+          await KuiperStore.patchBoard(apiKey, { archived: false }, boardStoreOpts());
           await refreshNavSidebar();
+          ctx.toast?.(tr('restore'));
           await renderBody();
         } catch (err) {
           ctx.toast?.(err.message);
@@ -352,10 +413,12 @@ const KuiperWorkspaceAdmin = (() => {
       btn.onclick = async () => {
         const slug = btn.dataset.boardSlug;
         const row = btn.closest('.kuiper-ws-board-row');
+        const apiKey = row?.dataset.boardId || boardApiKey(slug);
         const name = row?.dataset.boardName || slug;
         if (!await confirmDeleteEntity(name)) return;
         try {
-          await KuiperStore.deleteBoard(slug);
+          await KuiperStore.deleteBoard(apiKey, boardStoreOpts());
+          ctx.toast?.(tr('workspaceAdminDeletedToast'));
           await afterBoardRemoved(slug);
           await renderBody();
         } catch (err) {
@@ -381,6 +444,7 @@ const KuiperWorkspaceAdmin = (() => {
         return;
       }
       selectedBoardSlug = slug;
+      selectedBoardId = created?.board?.id || created?.id || null;
       const nameInput = root.querySelector('#kuiperWsNewBoardName');
       if (nameInput) nameInput.value = '';
       await activateBoardInPlace(slug);
@@ -410,7 +474,7 @@ const KuiperWorkspaceAdmin = (() => {
       dragRow = null;
       if (!startOrder || JSON.stringify(order) === JSON.stringify(startOrder)) return;
       try {
-        await KuiperStore.reorderStages(slug, order);
+        await KuiperStore.reorderStages(slug, order, boardStoreOpts());
         await afterBoardDetailMutation(slug);
       } catch (err) {
         ctx.toast?.(err.message);
@@ -468,11 +532,16 @@ const KuiperWorkspaceAdmin = (() => {
   }
 
   async function renderBoardsTab(body) {
-    const org = orgSlug();
+    managedOrgSlug = orgSlug();
+    syncOrgInUrl();
+    const org = managedOrgSlug;
     const current = boardSlug();
     const boards = await KuiperStore.listOrgBoards(org, { includeArchived: showArchivedEntities }).catch(() => []);
     if (!selectedBoardSlug || !boards.some(b => b.slug === selectedBoardSlug)) {
       selectedBoardSlug = current || boards[0]?.slug || '';
+      selectedBoardId = boards.find(b => b.slug === selectedBoardSlug)?.id || null;
+    } else {
+      selectedBoardId = boards.find(b => b.slug === selectedBoardSlug)?.id || selectedBoardId;
     }
     body.classList.add('kuiper-ws-boards-tab');
     body.innerHTML = `
@@ -518,15 +587,19 @@ const KuiperWorkspaceAdmin = (() => {
   async function fillBoardDetail(hostEl, slug, fallbackName) {
     const st = ctx.state?.();
     const isCurrent = slug === boardSlug();
+    const apiKey = boardApiKey(slug);
+    const bOpts = boardStoreOpts();
     let membership = { projects: [], stages: [] };
     try {
-      membership = await KuiperStore.loadBoardMembership(slug);
-    } catch (_) {
+      membership = await KuiperStore.loadBoardMembership(apiKey, bOpts);
+    } catch (err) {
       if (isCurrent) {
         membership = { projects: st?.projects || [], stages: st?.columns || [] };
+      } else {
+        ctx.toast?.(err.message);
       }
     }
-    const orgProjects = await KuiperStore.listOrgProjects(orgSlug()).catch(() => []);
+    const orgProjects = await KuiperStore.listOrgProjects(managedOrgSlug || orgSlug()).catch(() => []);
     const linked = new Set((membership.projects || []).map(p => p.id));
     const boardName = isCurrent
       ? (st?._kuiper?.boardName || fallbackName)
@@ -564,17 +637,17 @@ const KuiperWorkspaceAdmin = (() => {
         <button type="button" class="icon sm danger" data-del-stage="${esc(s.id)}">×</button>`;
       stagesEl.append(li);
     });
-    wireStageDrag(slug, stagesEl);
+    wireStageDrag(apiKey, stagesEl);
     stagesEl.querySelectorAll('input').forEach(inp => {
       inp.onchange = async () => {
-        await KuiperStore.updateStage(slug, inp.dataset.stageId, { name: inp.value.trim() });
+        await KuiperStore.updateStage(apiKey, inp.dataset.stageId, { name: inp.value.trim() }, bOpts);
         await afterBoardDetailMutation(slug);
       };
     });
     stagesEl.querySelectorAll('[data-del-stage]').forEach(btn => {
       btn.onclick = async () => {
         try {
-          await KuiperStore.deleteStage(slug, btn.dataset.delStage);
+          await KuiperStore.deleteStage(apiKey, btn.dataset.delStage, bOpts);
           await afterBoardDetailMutation(slug);
         } catch (err) {
           ctx.toast?.(err.message);
@@ -587,7 +660,7 @@ const KuiperWorkspaceAdmin = (() => {
       const name = addStageInput?.value.trim();
       if (!name) return;
       try {
-        await KuiperStore.createStage(slug, name);
+        await KuiperStore.createStage(apiKey, name, bOpts);
         if (addStageInput) addStageInput.value = '';
         await afterBoardDetailMutation(slug);
       } catch (err) {
@@ -606,7 +679,7 @@ const KuiperWorkspaceAdmin = (() => {
     hostEl.querySelector('[data-act="save-board-name"]').onclick = async () => {
       const name = hostEl.querySelector('#kuiperWsBoardName').value.trim();
       if (!name) return;
-      await KuiperStore.patchBoard(slug, { name });
+      await KuiperStore.patchBoard(apiKey, { name }, bOpts);
       await afterBoardDetailMutation(slug);
     };
     const projEl = hostEl.querySelector('#kuiperWsBoardProjects');
@@ -620,8 +693,10 @@ const KuiperWorkspaceAdmin = (() => {
     projEl.querySelectorAll('input[type=checkbox]').forEach(cb => {
       cb.onchange = async () => {
         try {
-          if (cb.checked) await KuiperStore.linkBoardProject(slug, cb.dataset.pid);
-          else await KuiperStore.unlinkBoardProject(slug, cb.dataset.pid);
+          syncOrgInUrl();
+          const linkOpts = boardStoreOpts();
+          if (cb.checked) await KuiperStore.linkBoardProject(apiKey, cb.dataset.pid, linkOpts);
+          else await KuiperStore.unlinkBoardProject(apiKey, cb.dataset.pid, linkOpts);
           await afterBoardDetailMutation(slug);
         } catch (err) {
           ctx.toast?.(err.message);
@@ -642,6 +717,7 @@ const KuiperWorkspaceAdmin = (() => {
   }
 
   async function renderOrganizationsTab(body) {
+    syncOrgInUrl();
     const orgs = await KuiperStore.listOrganizations({ includeArchived: showArchivedEntities });
     const active = orgSlug();
     body.innerHTML = `
@@ -666,7 +742,7 @@ const KuiperWorkspaceAdmin = (() => {
       const isActive = o.slug === active;
       const isArchived = archivedFlag(o);
       const li = document.createElement('li');
-      li.className = `kuiper-ws-list-row kuiper-ws-org-row${isActive ? ' is-active-org' : ''}${isArchived ? ' is-archived-entity' : ''}`;
+      li.className = `kuiper-ws-list-row kuiper-ws-entity-row kuiper-ws-org-row${isActive ? ' is-active-org' : ''}${isArchived ? ' is-archived-entity' : ''}`;
       li.dataset.orgSlug = o.slug;
       const activePart = isActive
         ? `<span class="kuiper-ws-board-current">${esc(tr('workspaceAdminActiveOrg'))}</span>`
@@ -682,10 +758,9 @@ const KuiperWorkspaceAdmin = (() => {
         slugAttr: 'org-slug',
         slug: o.slug,
       });
-      li.innerHTML = `<input type="text" class="kuiper-ws-input" value="${esc(o.name)}" data-org-slug="${esc(o.slug)}">
-        <span class="faint kuiper-ws-org-slug">${esc(o.slug)}</span>
-        ${archBadge}
-        ${activePart}
+      li.innerHTML = `<input type="text" class="kuiper-ws-input kuiper-ws-entity-name" value="${esc(o.name)}" data-org-slug="${esc(o.slug)}">
+        <span class="faint kuiper-ws-entity-slug">${esc(o.slug)}</span>
+        <div class="kuiper-ws-entity-status">${archBadge}${activePart}</div>
         ${actions}`;
       ul.append(li);
     }
@@ -724,6 +799,7 @@ const KuiperWorkspaceAdmin = (() => {
             }
           }
           await refreshNavSidebar();
+          ctx.toast?.(tr('workspaceAdminArchivedToast'));
           await renderBody();
         } catch (err) {
           ctx.toast?.(err.message);
@@ -736,6 +812,7 @@ const KuiperWorkspaceAdmin = (() => {
         try {
           await KuiperStore.patchOrganization(slug, { archived: false });
           await refreshNavSidebar();
+          ctx.toast?.(tr('restore'));
           await renderBody();
         } catch (err) {
           ctx.toast?.(err.message);
@@ -756,6 +833,7 @@ const KuiperWorkspaceAdmin = (() => {
             else ctx.resetOrgContext?.({});
           }
           await refreshNavSidebar();
+          ctx.toast?.(tr('workspaceAdminDeletedToast'));
           await renderBody();
         } catch (err) {
           ctx.toast?.(err.message);
@@ -789,6 +867,7 @@ const KuiperWorkspaceAdmin = (() => {
   }
 
   async function renderProjectsTab(body) {
+    syncOrgInUrl();
     const projects = await KuiperStore.listOrgProjects(orgSlug(), { includeArchived: showArchivedEntities });
     body.innerHTML = `
       <section class="kuiper-ws-section">
@@ -808,7 +887,7 @@ const KuiperWorkspaceAdmin = (() => {
     for (const p of projects) {
       const isArchived = archivedFlag(p);
       const li = document.createElement('li');
-      li.className = `kuiper-ws-list-row${isArchived ? ' is-archived-entity' : ''}`;
+      li.className = `kuiper-ws-list-row kuiper-ws-entity-row kuiper-ws-project-row${isArchived ? ' is-archived-entity' : ''}`;
       const archBadge = isArchived
         ? `<span class="kuiper-ws-archived-badge">${esc(tr('workspaceAdminArchivedBadge'))}</span>`
         : '';
@@ -820,8 +899,8 @@ const KuiperWorkspaceAdmin = (() => {
         slugAttr: 'project-id',
         slug: p.id,
       });
-      li.innerHTML = `<input type="text" class="kuiper-ws-input" value="${esc(p.name)}" data-pid="${esc(p.id)}">
-        ${archBadge}
+      li.innerHTML = `<input type="text" class="kuiper-ws-input kuiper-ws-entity-name" value="${esc(p.name)}" data-pid="${esc(p.id)}">
+        <div class="kuiper-ws-entity-status">${archBadge}</div>
         ${actions}`;
       ul.append(li);
     }
@@ -843,6 +922,7 @@ const KuiperWorkspaceAdmin = (() => {
         if (!await confirmArchiveEntity(name)) return;
         try {
           await KuiperStore.patchProject(id, { archived: true });
+          ctx.toast?.(tr('workspaceAdminArchivedToast'));
           await reloadBoard();
           await renderBody();
         } catch (err) {
@@ -855,6 +935,7 @@ const KuiperWorkspaceAdmin = (() => {
         const id = btn.dataset.projectId;
         try {
           await KuiperStore.patchProject(id, { archived: false });
+          ctx.toast?.(tr('restore'));
           await reloadBoard();
           await renderBody();
         } catch (err) {
@@ -870,6 +951,7 @@ const KuiperWorkspaceAdmin = (() => {
         if (!await confirmDeleteEntity(name)) return;
         try {
           await KuiperStore.deleteProject(id);
+          ctx.toast?.(tr('workspaceAdminDeletedToast'));
           await reloadBoard();
           await renderBody();
         } catch (err) {

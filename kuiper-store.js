@@ -2,6 +2,20 @@
 const KuiperStore = (() => {
   const boardSlug = () => new URLSearchParams(location.search).get('board') || 'hub-delivery';
 
+  function activeOrgSlug() {
+    return new URLSearchParams(location.search).get('org') || '';
+  }
+
+  function boardApiPath(slugOrId, suffix = '', opts = {}) {
+    const s = encodeURIComponent(slugOrId || boardSlug());
+    const params = new URLSearchParams();
+    const org = opts.org || activeOrgSlug();
+    if (org) params.set('org', org);
+    if (opts.organizationId) params.set('organization_id', opts.organizationId);
+    const q = params.toString() ? `?${params}` : '';
+    return `/api/v1/boards/${s}${suffix}${q}`;
+  }
+
   async function request(path, options = {}) {
     const headers = { ...(options.headers || {}) };
     if (options.body != null && headers['Content-Type'] == null) {
@@ -15,12 +29,12 @@ const KuiperStore = (() => {
     return payload.data ?? payload;
   }
 
-  async function loadBoard(slug) {
-    return request(`/api/v1/boards/${encodeURIComponent(slug || boardSlug())}/state`);
+  async function loadBoard(slug, opts = {}) {
+    return request(boardApiPath(slug, '/state', opts));
   }
 
-  async function loadBoardSnapshot(slug) {
-    return request(`/api/v1/boards/${encodeURIComponent(slug || boardSlug())}`);
+  async function loadBoardSnapshot(slug, opts = {}) {
+    return request(boardApiPath(slug, '', opts));
   }
 
   async function loadNavigation() {
@@ -116,8 +130,8 @@ const KuiperStore = (() => {
     return request(`/api/v1/organizations/${encodeURIComponent(orgSlug)}`, { method: 'DELETE' });
   }
 
-  async function deleteBoard(slug) {
-    return request(`/api/v1/boards/${encodeURIComponent(slug)}`, { method: 'DELETE' });
+  async function deleteBoard(slug, opts = {}) {
+    return request(boardApiPath(slug, '', opts), { method: 'DELETE' });
   }
 
   async function createOrganization(body) {
@@ -175,55 +189,55 @@ const KuiperStore = (() => {
     return request(`/api/v1/projects/${encodeURIComponent(id)}`, { method: 'DELETE' });
   }
 
-  async function patchBoard(slug, body) {
-    const data = await request(`/api/v1/boards/${encodeURIComponent(slug)}`, {
+  async function patchBoard(slug, body, opts = {}) {
+    const data = await request(boardApiPath(slug, '', opts), {
       method: 'PATCH',
       body: JSON.stringify(body),
     });
     return data.board;
   }
 
-  async function loadBoardMembership(slug) {
-    return request(`/api/v1/boards/${encodeURIComponent(slug)}/membership`);
+  async function loadBoardMembership(slug, opts = {}) {
+    return request(boardApiPath(slug, '/membership', opts));
   }
 
-  async function linkBoardProject(slug, projectId) {
-    return request(`/api/v1/boards/${encodeURIComponent(slug)}/projects`, {
+  async function linkBoardProject(slug, projectId, opts = {}) {
+    return request(boardApiPath(slug, '/projects', opts), {
       method: 'POST',
       body: JSON.stringify({ project_id: projectId }),
     });
   }
 
-  async function unlinkBoardProject(slug, projectId) {
-    return request(`/api/v1/boards/${encodeURIComponent(slug)}/projects/${encodeURIComponent(projectId)}`, {
+  async function unlinkBoardProject(slug, projectId, opts = {}) {
+    return request(boardApiPath(slug, `/projects/${encodeURIComponent(projectId)}`, opts), {
       method: 'DELETE',
     });
   }
 
-  async function createStage(slug, name) {
-    const data = await request(`/api/v1/boards/${encodeURIComponent(slug)}/stages`, {
+  async function createStage(slug, name, opts = {}) {
+    const data = await request(boardApiPath(slug, '/stages', opts), {
       method: 'POST',
       body: JSON.stringify({ name }),
     });
     return data.stage;
   }
 
-  async function updateStage(slug, stageId, body) {
-    const data = await request(`/api/v1/boards/${encodeURIComponent(slug)}/stages/${encodeURIComponent(stageId)}`, {
+  async function updateStage(slug, stageId, body, opts = {}) {
+    const data = await request(boardApiPath(slug, `/stages/${encodeURIComponent(stageId)}`, opts), {
       method: 'PATCH',
       body: JSON.stringify(body),
     });
     return data.stage;
   }
 
-  async function deleteStage(slug, stageId) {
-    return request(`/api/v1/boards/${encodeURIComponent(slug)}/stages/${encodeURIComponent(stageId)}`, {
+  async function deleteStage(slug, stageId, opts = {}) {
+    return request(boardApiPath(slug, `/stages/${encodeURIComponent(stageId)}`, opts), {
       method: 'DELETE',
     });
   }
 
-  async function reorderStages(slug, order) {
-    const data = await request(`/api/v1/boards/${encodeURIComponent(slug)}/stages/reorder`, {
+  async function reorderStages(slug, order, opts = {}) {
+    const data = await request(boardApiPath(slug, '/stages/reorder', opts), {
       method: 'PATCH',
       body: JSON.stringify({ order }),
     });
@@ -254,13 +268,13 @@ const KuiperStore = (() => {
     return request(`/api/v1/epics/${encodeURIComponent(id)}`, { method: 'DELETE' });
   }
 
-  async function listBoardTags(slug) {
-    const data = await request(`/api/v1/boards/${encodeURIComponent(slug)}/tags`);
+  async function listBoardTags(slug, opts = {}) {
+    const data = await request(boardApiPath(slug, '/tags', opts));
     return data.tags || [];
   }
 
-  async function createBoardTag(slug, name) {
-    const data = await request(`/api/v1/boards/${encodeURIComponent(slug)}/tags`, {
+  async function createBoardTag(slug, name, opts = {}) {
+    const data = await request(boardApiPath(slug, '/tags', opts), {
       method: 'POST',
       body: JSON.stringify({ name }),
     });

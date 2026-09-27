@@ -406,12 +406,8 @@ const KuiperUI = (() => {
     }
   }
 
-  function sidebarQuickAddMarkup() {
+  function sidebarQuickPanelMarkup() {
     return `
-        <div class="kuiper-side-quick-add kuiper-ws-row">
-          <button type="button" class="pill sm" id="kuiperSideNewBoard">+ ${esc(tr('boards'))}</button>
-          <button type="button" class="pill sm" id="kuiperSideNewProject">+ ${esc(tr('projects'))}</button>
-        </div>
         <div id="kuiperSideQuickPanel" class="kuiper-side-quick-panel" hidden>
           <input type="text" class="kuiper-ws-input" id="kuiperSideQuickName" autocomplete="off">
           <div class="kuiper-ws-row kuiper-side-quick-panel-actions">
@@ -421,26 +417,77 @@ const KuiperUI = (() => {
         </div>`;
   }
 
+  function sideSectionHeadHtml({ headId, i18nKey, btnId, labelKey }) {
+    return `<div class="kuiper-side-section-head" id="${headId}">
+          <div class="menu-label" data-i18n="${i18nKey}"></div>
+          <button type="button" class="kuiper-side-add" id="${btnId}" aria-label="${esc(tr(labelKey))}" title="${esc(tr(labelKey))}">+</button>
+        </div>`;
+  }
+
+  function upgradeSideSectionHead(body, { i18nKey, headId, btnId, labelKey }) {
+    if (document.getElementById(headId)) return;
+    const label = body.querySelector(`.menu-label[data-i18n="${i18nKey}"]`);
+    if (!label || label.closest('.kuiper-side-section-head')) return;
+    const head = document.createElement('div');
+    head.className = 'kuiper-side-section-head';
+    head.id = headId;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'kuiper-side-add';
+    btn.id = btnId;
+    btn.textContent = '+';
+    btn.setAttribute('aria-label', tr(labelKey));
+    label.parentNode.insertBefore(head, label);
+    head.append(label, btn);
+  }
+
   function patchSidebarDom(side) {
     const body = side?.querySelector('.kuiper-side-body');
     if (!body) return;
     body.querySelector('.kuiper-side-projects-hint')?.remove();
-    if (!document.getElementById('kuiperSideNewBoard')) {
-      const anchor = body.querySelector('.kuiper-org-select-wrap') || body.querySelector('.menu-label');
-      if (anchor) anchor.insertAdjacentHTML('afterend', sidebarQuickAddMarkup());
-    }
-    if (!document.getElementById('kuiperSideQuickPanel') && document.getElementById('kuiperSideNewBoard')) {
-      document.getElementById('kuiperSideNewBoard').closest('.kuiper-side-quick-add')
-        ?.insertAdjacentHTML('afterend', `
-        <div id="kuiperSideQuickPanel" class="kuiper-side-quick-panel" hidden>
-          <input type="text" class="kuiper-ws-input" id="kuiperSideQuickName" autocomplete="off">
-          <div class="kuiper-ws-row kuiper-side-quick-panel-actions">
-            <button type="button" class="ghost sm" id="kuiperSideQuickCancel">${esc(tr('cancel'))}</button>
-            <button type="button" class="pill sm" id="kuiperSideQuickSubmit">${esc(tr('create'))}</button>
-          </div>
-        </div>`);
+    body.querySelector('.kuiper-side-quick-add')?.remove();
+    upgradeSideSectionHead(body, {
+      i18nKey: 'boards',
+      headId: 'kuiperBoardsSectionHead',
+      btnId: 'kuiperSideNewBoard',
+      labelKey: 'workspaceAdminNewBoard',
+    });
+    upgradeSideSectionHead(body, {
+      i18nKey: 'projects',
+      headId: 'kuiperProjectsSectionHead',
+      btnId: 'kuiperSideNewProject',
+      labelKey: 'workspaceAdminNewProject',
+    });
+    if (!document.getElementById('kuiperSideQuickPanel')) {
+      const boardsHead = document.getElementById('kuiperBoardsSectionHead');
+      if (boardsHead) boardsHead.insertAdjacentHTML('afterend', sidebarQuickPanelMarkup());
+      else body.querySelector('.kuiper-org-select-wrap')?.insertAdjacentHTML('afterend', sidebarQuickPanelMarkup());
     }
     wireSideQuickAdd();
+    syncSideAddButtonLabels();
+  }
+
+  function syncSideAddButtonLabels() {
+    const boardBtn = document.getElementById('kuiperSideNewBoard');
+    const projBtn = document.getElementById('kuiperSideNewProject');
+    const boardLabel = tr('workspaceAdminNewBoard');
+    const projLabel = tr('workspaceAdminNewProject');
+    if (boardBtn) {
+      boardBtn.setAttribute('aria-label', boardLabel);
+      boardBtn.title = boardLabel;
+    }
+    if (projBtn) {
+      projBtn.setAttribute('aria-label', projLabel);
+      projBtn.title = projLabel;
+    }
+  }
+
+  function placeSideQuickPanel(mode) {
+    const panel = document.getElementById('kuiperSideQuickPanel');
+    const headId = mode === 'board' ? 'kuiperBoardsSectionHead' : 'kuiperProjectsSectionHead';
+    const head = document.getElementById(headId);
+    if (!panel || !head) return;
+    if (panel.previousElementSibling !== head) head.after(panel);
   }
 
   function closeSideQuickPanel() {
@@ -458,6 +505,7 @@ const KuiperUI = (() => {
       return;
     }
     sideQuickMode = mode;
+    placeSideQuickPanel(mode);
     const panel = document.getElementById('kuiperSideQuickPanel');
     const input = document.getElementById('kuiperSideQuickName');
     if (!panel || !input) return;
@@ -490,7 +538,7 @@ const KuiperUI = (() => {
         const project = await KuiperStore.createOrgProject(org, { name });
         const boardSlug = currentBoardSlug();
         if (boardSlug && project?.id) {
-          await KuiperStore.linkBoardProject(boardSlug, project.id);
+          await KuiperStore.linkBoardProject(boardSlug, project.id, { org });
         }
         await loadNavigation();
         if (boardSlug) await ctx.loadKuiperBoard?.();
@@ -535,12 +583,22 @@ const KuiperUI = (() => {
             </div>
           </div>
         </div>
-        ${sidebarQuickAddMarkup()}
         <div class="menu-label" data-i18n="favorites"></div>
         <div id="kuiperFavList" class="kuiper-list"></div>
-        <div class="menu-label" data-i18n="boards"></div>
+        ${sideSectionHeadHtml({
+    headId: 'kuiperBoardsSectionHead',
+    i18nKey: 'boards',
+    btnId: 'kuiperSideNewBoard',
+    labelKey: 'workspaceAdminNewBoard',
+  })}
+        ${sidebarQuickPanelMarkup()}
         <div id="kuiperBoardTree" class="kuiper-tree kuiper-board-list"></div>
-        <div class="menu-label" data-i18n="projects"></div>
+        ${sideSectionHeadHtml({
+    headId: 'kuiperProjectsSectionHead',
+    i18nKey: 'projects',
+    btnId: 'kuiperSideNewProject',
+    labelKey: 'workspaceAdminNewProject',
+  })}
         <div id="kuiperProjectList" class="kuiper-list"></div>
       </div>`;
     document.body.append(side);
@@ -713,6 +771,13 @@ const KuiperUI = (() => {
       boardViewBeforeWorkspace = isPersistedBoardView(prefs.boardViewBeforeWorkspace)
         ? prefs.boardViewBeforeWorkspace
         : 'board';
+      const org = currentOrgSlug();
+      if (org) {
+        const u = new URL(location.href);
+        u.searchParams.set('kuiper', '1');
+        u.searchParams.set('org', org);
+        history.replaceState(null, '', `${u.pathname}${u.search}${u.hash}`);
+      }
     } else if (isPersistedBoardView(prefs.boardView)) {
       boardView = prefs.boardView;
       boardViewBeforeWorkspace = boardView;
@@ -747,6 +812,10 @@ const KuiperUI = (() => {
       ctx.toast?.(tr('workspaceAdminNeedsOrg'));
       return;
     }
+    const u = new URL(location.href);
+    u.searchParams.set('kuiper', '1');
+    u.searchParams.set('org', org);
+    history.replaceState(null, '', `${u.pathname}${u.search}${u.hash}`);
     if (boardView !== 'workspace') boardViewBeforeWorkspace = boardView;
     boardView = 'workspace';
     document.documentElement.dataset.kuiperView = 'workspace';
@@ -1651,6 +1720,7 @@ const KuiperUI = (() => {
     if (title) title.textContent = tr('workspace');
     wireWorkspaceManageBtn();
     patchSidebarDom(side);
+    syncSideAddButtonLabels();
     renderOrgSelector();
     renderFavorites();
     renderBoardTree();

@@ -11,7 +11,7 @@ const comments = require('../db/repositories/comments.js');
 const cardDetail = require('../db/repositories/card-detail.js');
 const { snapshotToState, attachOrganization } = require('../board-view.js');
 const { buildNavigation } = require('../navigation.js');
-const { sendJson, readBody, cors } = require('./middleware.js');
+const { sendJson, readBody, cors, boardResolveOptions } = require('./middleware.js');
 const { handleWorkspaceRoutes } = require('./workspace-routes.js');
 
 function notFound(res) {
@@ -64,7 +64,7 @@ async function handleApi(req, res, db, urlPath, method) {
   const boardMatch = urlPath.match(/^\/api\/v1\/boards\/([^/]+)$/);
   if (boardMatch && method === 'GET') {
     try {
-      const snapshot = boards.getSnapshot(db, decodeURIComponent(boardMatch[1]));
+      const snapshot = boards.getSnapshot(db, decodeURIComponent(boardMatch[1]), boardResolveOptions(req));
       return sendJson(res, 200, { ok: true, data: snapshot });
     } catch (err) {
       return notFound(res);
@@ -74,7 +74,7 @@ async function handleApi(req, res, db, urlPath, method) {
   const boardTagsMatch = urlPath.match(/^\/api\/v1\/boards\/([^/]+)\/tags$/);
   if (boardTagsMatch && method === 'GET') {
     try {
-      const board = boards.resolveBoard(db, decodeURIComponent(boardTagsMatch[1]));
+      const board = boards.resolveBoard(db, decodeURIComponent(boardTagsMatch[1]), boardResolveOptions(req));
       if (!board) return notFound(res);
       return sendJson(res, 200, { ok: true, data: { tags: tags.listByBoard(db, board.id) } });
     } catch (err) {
@@ -85,7 +85,7 @@ async function handleApi(req, res, db, urlPath, method) {
   const boardStateMatch = urlPath.match(/^\/api\/v1\/boards\/([^/]+)\/state$/);
   if (boardStateMatch && method === 'GET') {
     try {
-      const raw = boards.getSnapshot(db, decodeURIComponent(boardStateMatch[1]));
+      const raw = boards.getSnapshot(db, decodeURIComponent(boardStateMatch[1]), boardResolveOptions(req));
       const snapshot = attachOrganization(raw, db);
       return sendJson(res, 200, { ok: true, data: snapshotToState(snapshot) });
     } catch (err) {

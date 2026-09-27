@@ -18,12 +18,14 @@ const KuiperConfirm = (() => {
         <div class="kuiper-confirm-card" role="dialog" aria-modal="true">
           <h3 class="kuiper-confirm-title">${esc(title)}</h3>
           <p class="kuiper-confirm-msg">${esc(message)}</p>
-          <div class="kuiper-ws-row kuiper-confirm-actions">
-            <button type="button" class="ghost sm" data-act="cancel">${esc(cancelLabel)}</button>
-            <button type="button" class="pill sm danger" data-act="ok">${esc(confirmLabel)}</button>
+          <div class="kuiper-confirm-actions">
+            <button type="button" class="kuiper-confirm-btn ghost" data-act="cancel">${esc(cancelLabel)}</button>
+            <button type="button" class="kuiper-confirm-btn danger" data-act="ok">${esc(confirmLabel)}</button>
           </div>
         </div>`;
       document.body.append(scrim);
+      const card = scrim.querySelector('.kuiper-confirm-card');
+      card?.addEventListener('click', e => e.stopPropagation());
       const close = v => { removeModal(); resolve(v); };
       scrim.querySelector('[data-act="cancel"]').onclick = () => close(false);
       scrim.querySelector('[data-act="ok"]').onclick = () => close(true);
@@ -31,7 +33,7 @@ const KuiperConfirm = (() => {
     });
   }
 
-  function confirmDelete({ title, message, typeWord, confirmLabel, cancelLabel }) {
+  function confirmDelete({ title, message, typeWord, placeholder, confirmLabel, cancelLabel }) {
     return new Promise(resolve => {
       removeModal();
       const scrim = document.createElement('div');
@@ -42,15 +44,16 @@ const KuiperConfirm = (() => {
           <h3 class="kuiper-confirm-title">${esc(title)}</h3>
           <p class="kuiper-confirm-msg">${esc(message)}</p>
           <label class="kuiper-confirm-type-label">
-            <span>${esc(typeWord)}</span>
-            <input type="text" class="kuiper-ws-input" id="kuiperConfirmType" autocomplete="off" spellcheck="false">
+            <input type="text" class="kuiper-confirm-input" id="kuiperConfirmType" autocomplete="off" spellcheck="false" inputmode="text" placeholder="${esc(placeholder || typeWord)}">
           </label>
-          <div class="kuiper-ws-row kuiper-confirm-actions">
-            <button type="button" class="ghost sm" data-act="cancel">${esc(cancelLabel)}</button>
-            <button type="button" class="pill sm danger" data-act="ok" disabled>${esc(confirmLabel)}</button>
+          <div class="kuiper-confirm-actions">
+            <button type="button" class="kuiper-confirm-btn ghost" data-act="cancel">${esc(cancelLabel)}</button>
+            <button type="button" class="kuiper-confirm-btn danger" data-act="ok" disabled>${esc(confirmLabel)}</button>
           </div>
         </div>`;
       document.body.append(scrim);
+      const card = scrim.querySelector('.kuiper-confirm-card');
+      card?.addEventListener('click', e => e.stopPropagation());
       const input = scrim.querySelector('#kuiperConfirmType');
       const ok = scrim.querySelector('[data-act="ok"]');
       const close = v => { removeModal(); resolve(v); };

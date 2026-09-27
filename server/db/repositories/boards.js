@@ -60,10 +60,19 @@ function getBySlug(db, orgSlug, boardSlug) {
     .get(org.id, slugify(boardSlug)) || null;
 }
 
-function resolveBoard(db, idOrSlug) {
+function resolveBoard(db, idOrSlug, { organization_id, organization_slug } = {}) {
   const byId = getById(db, idOrSlug);
   if (byId) return byId;
-  const rows = db.prepare('SELECT * FROM boards WHERE slug = ?').all(slugify(idOrSlug));
+  const slug = slugify(idOrSlug);
+  let orgId = organization_id;
+  if (!orgId && organization_slug) {
+    const org = orgs.getBySlug(db, organization_slug);
+    orgId = org ? org.id : null;
+  }
+  if (orgId) {
+    return db.prepare('SELECT * FROM boards WHERE organization_id = ? AND slug = ?').get(orgId, slug) || null;
+  }
+  const rows = db.prepare('SELECT * FROM boards WHERE slug = ?').all(slug);
   if (rows.length === 1) return rows[0];
   if (rows.length > 1) throw new Error(`ambiguous board slug "${idOrSlug}"`);
   return null;
@@ -123,8 +132,8 @@ function removeProject(db, { board_id, project_id }) {
   return { board_id, project_id };
 }
 
-function getSnapshot(db, idOrSlug) {
-  const board = resolveBoard(db, idOrSlug);
+function getSnapshot(db, idOrSlug, resolveOpts) {
+  const board = resolveBoard(db, idOrSlug, resolveOpts);
   if (!board) throw new Error(`board not found: ${idOrSlug}`);
   const stageRows = listStages(db, board.id);
   const projectRows = listProjects(db, board.id);

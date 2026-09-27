@@ -2,7 +2,7 @@
 
 Especificación **completa** del sistema de diseño actual. Toda feature UI nueva debe cumplirla. Si algo no está aquí, no está definido — amplía este documento en el mismo PR.
 
-**Fuente de verdad en código:** `styles.css`, `index.html`, `app.js`, `kuiper-ui.js`, `kuiper-issue-panel.js`, `kuiper-datetime-picker.js`, `tooltip.js`.
+**Fuente de verdad en código:** `styles.css`, `index.html`, `app.js`, `kuiper-ui.js`, `kuiper-issue-panel.js`, `kuiper-datetime-picker.js`, `kuiper-confirm.js`, `tooltip.js`.
 
 | Documento | Rol |
 | --- | --- |
@@ -270,6 +270,7 @@ Overlays (sheet / panel) se superponen al board; no reducen su ancho.
 | 110 | `.menu` |
 | 120 | `.toast` |
 | 140 | `.kuiper-delete-dlg` |
+| 12000 | `.kuiper-confirm-scrim` (Manage workspace: archivar / eliminar entidad) |
 | 200 | `.card-ghost-wrap` |
 | 300 | `.col-ghost-wrap` |
 | 400 | `.update-notice` |
@@ -795,9 +796,27 @@ Claves i18n en `kuiper-issue-panel.js` → `hist*`:
 
 `histCreated`, `histMoved`, `histArchived`, `histRestored`, `histUpdated`, `histTitleChanged`, `histNotesChanged`, `histPriorityChanged`, `histProjectChanged`, `histEpicChanged`, `histEstimateChanged`, `histTagsChanged`, `histCommentAdded`, `histCommentUpdated`, `histTimeLogged`, `histTimerStarted`, `histTimerStopped`, `histTimerDiscarded`, `histLinkAdded`, `histLinkRemoved`.
 
-### 11.9 Delete card
+### 11.9 Diálogos de confirmación (delete / archive)
 
-Diálogo `.kuiper-delete-dlg` → input confirmación título → `.kuiper-delete-actions .danger` pill rojo.
+Dos implementaciones comparten **tokens y layout**; no inventar fondos ni tokens nuevos.
+
+| Uso | Marcado | Archivo |
+| --- | --- | --- |
+| Eliminar tarjeta en editor | `.kuiper-delete-dlg` + `.kuiper-delete-card` | `kuiper-ui.js` |
+| Archivar / eliminar org, board, project (Manage) | `.kuiper-confirm-scrim` + `.kuiper-confirm-card` | `kuiper-confirm.js` |
+
+**Scrim (backdrop):** igual que `.scrim` — `background: color-mix(in srgb, var(--bg) 62%, transparent)`, `backdrop-filter: blur(3px)`, animación `fade` 180ms. **Prohibido** `rgba(0,0,0,*)` plano o tokens inexistentes (p. ej. `--panel`).
+
+**Tarjeta:** igual que `.kuiper-delete-card` / `.sheet` — fondo **`--surface`** opaco, borde `--line`, `border-radius: 14px`, sombra `var(--sh-2)`, ancho `min(26rem, 100%)`.
+
+**Eliminar con palabra clave:**
+
+- Título (`h3`, ui 15–16px) + párrafo (`--muted`, 13px).
+- Un solo `<input>` ancho completo de la tarjeta (`width: 100%`, altura 36px, fondo `--raise`, focus `--bg` + borde `--line-hi`).
+- **Placeholder** del input: i18n `deleteConfirmInputPlaceholder` con `{word}` (sin dos puntos finales; p. ej. «Escribe "eliminar" para confirmar»). El párrafo encima usa `deleteConfirmHint` solo en el diálogo de tarjeta (`.kuiper-delete-dlg`); en Manage el contexto es `workspaceAdminDeleteMsg`.
+- Acciones alineadas a la derecha: cancelar (ghost) + confirmar peligro (`.kuiper-confirm-btn.danger` o `.danger` pill); confirmar deshabilitado hasta coincidencia exacta (case-insensitive) con `deleteConfirmWord`.
+
+**Archivar:** misma tarjeta y scrim; sin input; botones Cancel + Archive/Restore.
 
 ### 11.10 Responsive ≤760px
 

@@ -6,7 +6,11 @@ const boards = require('../db/repositories/boards.js');
 const epics = require('../db/repositories/epics.js');
 const tags = require('../db/repositories/tags.js');
 const sprints = require('../db/repositories/sprints.js');
-const { sendJson, readBody } = require('./middleware.js');
+const { sendJson, readBody, boardResolveOptions } = require('./middleware.js');
+
+function resolveBoardReq(db, req, slug) {
+  return boards.resolveBoard(db, slug, boardResolveOptions(req));
+}
 
 function conflict(res, message) {
   sendJson(res, 409, { ok: false, error: { code: 'conflict', message } });
@@ -178,7 +182,7 @@ async function handleWorkspaceRoutes(req, res, db, urlPath, method, { badRequest
 
   const boardMembership = urlPath.match(/^\/api\/v1\/boards\/([^/]+)\/membership$/);
   if (boardMembership && method === 'GET') {
-    const board = boards.resolveBoard(db, decodeURIComponent(boardMembership[1]));
+    const board = resolveBoardReq(db, req, decodeURIComponent(boardMembership[1]));
     if (!board) return notFound(res);
     return sendJson(res, 200, { ok: true, data: boards.getMembership(db, board.id) });
   }
@@ -186,7 +190,7 @@ async function handleWorkspaceRoutes(req, res, db, urlPath, method, { badRequest
   const boardPatch = urlPath.match(/^\/api\/v1\/boards\/([^/]+)$/);
   if (boardPatch && method === 'PATCH') {
     try {
-      const board = boards.resolveBoard(db, decodeURIComponent(boardPatch[1]));
+      const board = resolveBoardReq(db, req, decodeURIComponent(boardPatch[1]));
       if (!board) return notFound(res);
       const body = await readBody(req);
       const updated = boards.updateBoard(db, board.id, {
@@ -200,7 +204,7 @@ async function handleWorkspaceRoutes(req, res, db, urlPath, method, { badRequest
   }
   if (boardPatch && method === 'DELETE') {
     try {
-      const board = boards.resolveBoard(db, decodeURIComponent(boardPatch[1]));
+      const board = resolveBoardReq(db, req, decodeURIComponent(boardPatch[1]));
       if (!board) return notFound(res);
       const data = boards.removeBoard(db, board.id);
       return sendJson(res, 200, { ok: true, data });
@@ -212,7 +216,7 @@ async function handleWorkspaceRoutes(req, res, db, urlPath, method, { badRequest
   const boardProject = urlPath.match(/^\/api\/v1\/boards\/([^/]+)\/projects$/);
   if (boardProject && method === 'POST') {
     try {
-      const board = boards.resolveBoard(db, decodeURIComponent(boardProject[1]));
+      const board = resolveBoardReq(db, req, decodeURIComponent(boardProject[1]));
       if (!board) return notFound(res);
       const body = await readBody(req);
       boards.addProject(db, { board_id: board.id, project_id: body.project_id });
@@ -225,7 +229,7 @@ async function handleWorkspaceRoutes(req, res, db, urlPath, method, { badRequest
   const boardProjectDel = urlPath.match(/^\/api\/v1\/boards\/([^/]+)\/projects\/([^/]+)$/);
   if (boardProjectDel && method === 'DELETE') {
     try {
-      const board = boards.resolveBoard(db, decodeURIComponent(boardProjectDel[1]));
+      const board = resolveBoardReq(db, req, decodeURIComponent(boardProjectDel[1]));
       if (!board) return notFound(res);
       const projectId = decodeURIComponent(boardProjectDel[2]);
       const n = db.prepare('SELECT COUNT(*) AS c FROM cards WHERE board_id = ? AND project_id = ?').get(board.id, projectId);
@@ -240,7 +244,7 @@ async function handleWorkspaceRoutes(req, res, db, urlPath, method, { badRequest
   const boardStages = urlPath.match(/^\/api\/v1\/boards\/([^/]+)\/stages$/);
   if (boardStages && method === 'POST') {
     try {
-      const board = boards.resolveBoard(db, decodeURIComponent(boardStages[1]));
+      const board = resolveBoardReq(db, req, decodeURIComponent(boardStages[1]));
       if (!board) return notFound(res);
       const body = await readBody(req);
       const stage = boards.createStage(db, board.id, body.name);
@@ -253,7 +257,7 @@ async function handleWorkspaceRoutes(req, res, db, urlPath, method, { badRequest
   const boardStageReorder = urlPath.match(/^\/api\/v1\/boards\/([^/]+)\/stages\/reorder$/);
   if (boardStageReorder && method === 'PATCH') {
     try {
-      const board = boards.resolveBoard(db, decodeURIComponent(boardStageReorder[1]));
+      const board = resolveBoardReq(db, req, decodeURIComponent(boardStageReorder[1]));
       if (!board) return notFound(res);
       const body = await readBody(req);
       const stages = boards.reorderStages(db, board.id, body.order);
@@ -266,7 +270,7 @@ async function handleWorkspaceRoutes(req, res, db, urlPath, method, { badRequest
   const boardStage = urlPath.match(/^\/api\/v1\/boards\/([^/]+)\/stages\/([^/]+)$/);
   if (boardStage && method === 'PATCH') {
     try {
-      const board = boards.resolveBoard(db, decodeURIComponent(boardStage[1]));
+      const board = resolveBoardReq(db, req, decodeURIComponent(boardStage[1]));
       if (!board) return notFound(res);
       const body = await readBody(req);
       const stage = boards.updateStage(db, board.id, decodeURIComponent(boardStage[2]), body);
@@ -277,7 +281,7 @@ async function handleWorkspaceRoutes(req, res, db, urlPath, method, { badRequest
   }
   if (boardStage && method === 'DELETE') {
     try {
-      const board = boards.resolveBoard(db, decodeURIComponent(boardStage[1]));
+      const board = resolveBoardReq(db, req, decodeURIComponent(boardStage[1]));
       if (!board) return notFound(res);
       const data = boards.deleteStage(db, board.id, decodeURIComponent(boardStage[2]));
       return sendJson(res, 200, { ok: true, data });
@@ -289,7 +293,7 @@ async function handleWorkspaceRoutes(req, res, db, urlPath, method, { badRequest
   const boardTagsPost = urlPath.match(/^\/api\/v1\/boards\/([^/]+)\/tags$/);
   if (boardTagsPost && method === 'POST') {
     try {
-      const board = boards.resolveBoard(db, decodeURIComponent(boardTagsPost[1]));
+      const board = resolveBoardReq(db, req, decodeURIComponent(boardTagsPost[1]));
       if (!board) return notFound(res);
       const body = await readBody(req);
       const tag = tags.create(db, board.id, body.name);

@@ -380,6 +380,45 @@ describe('api', () => {
     assert.equal(del.status, 200);
   });
 
+  it('links project to board when slug is duplicated across orgs', async () => {
+    const orgA = await request('POST', '/api/v1/organizations', { name: 'Dup scope A' });
+    const orgB = await request('POST', '/api/v1/organizations', { name: 'Dup scope B' });
+    assert.equal(orgA.status, 201);
+    assert.equal(orgB.status, 201);
+    const slugA = orgA.body.data.organization.slug;
+    const slugB = orgB.body.data.organization.slug;
+    const boardA = await request('POST', `/api/v1/organizations/${encodeURIComponent(slugA)}/boards`, {
+      name: 'Shared Slug Board',
+      slug: 'dup-test-board',
+    });
+    const boardB = await request('POST', `/api/v1/organizations/${encodeURIComponent(slugB)}/boards`, {
+      name: 'Shared Slug Board',
+      slug: 'dup-test-board',
+    });
+    assert.equal(boardA.status, 201);
+    assert.equal(boardB.status, 201);
+    const proj = await request('POST', `/api/v1/organizations/${encodeURIComponent(slugA)}/projects`, { name: 'Dup link proj' });
+    assert.equal(proj.status, 201);
+    const projectId = proj.body.data.project.id;
+    const withoutOrg = await request('POST', '/api/v1/boards/dup-test-board/projects', { project_id: projectId });
+    assert.equal(withoutOrg.status, 400);
+    const withOrg = await request(
+      'POST',
+      `/api/v1/boards/dup-test-board/projects?org=${encodeURIComponent(slugA)}`,
+      { project_id: projectId },
+    );
+    assert.equal(withOrg.status, 200, JSON.stringify(withOrg.body));
+    const mem = await get(`/api/v1/boards/dup-test-board/membership?org=${encodeURIComponent(slugA)}`);
+    assert.ok(mem.body.data.projects.some(p => p.id === projectId));
+    const boardId = boardA.body.data.board.id;
+    const projB = await request('POST', `/api/v1/organizations/${encodeURIComponent(slugB)}/projects`, { name: 'Dup link proj B' });
+    const projectIdB = projB.body.data.project.id;
+    const byId = await request('POST', `/api/v1/boards/${boardId}/projects`, { project_id: projectId });
+    assert.equal(byId.status, 200, JSON.stringify(byId.body));
+    const withoutOrgDupSlug = await request('POST', '/api/v1/boards/dup-test-board/projects', { project_id: projectIdB });
+    assert.equal(withoutOrgDupSlug.status, 400);
+  });
+
   it('creates organization via POST', async () => {
     const res = await request('POST', '/api/v1/organizations', { name: 'Test Org UI' });
     assert.equal(res.status, 201);

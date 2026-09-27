@@ -34,4 +34,15 @@ function cors(req, res) {
   return true;
 }
 
-module.exports = { sendJson, readBody, cors };
+/** Opciones para resolver tablero por slug cuando hay duplicados entre organizaciones (`?org=`). */
+function boardResolveOptions(req) {
+  const q = new URL(req.url || '', 'http://localhost').searchParams;
+  const org = q.get('org');
+  const orgId = q.get('organization_id');
+  const out = {};
+  if (org) out.organization_slug = decodeURIComponent(org);
+  if (orgId) out.organization_id = decodeURIComponent(orgId);
+  return out;
+}
+
+module.exports = { sendJson, readBody, cors, boardResolveOptions };

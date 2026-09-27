@@ -11,9 +11,23 @@ const KuiperToast = (() => {
   const TYPES = new Set(['info', 'warning', 'error']);
 
   let stackEl = null;
+  let stackResizeObserver = null;
 
   function tr(key) {
     return typeof window.tr === 'function' ? window.tr(key) : key;
+  }
+
+  function syncChromeInsets() {
+    const root = document.documentElement;
+    const h = stackEl?.offsetHeight || 0;
+    const inset = h > 0 ? `${h + 10}px` : '0px';
+    root.style.setProperty('--toast-stack-inset', inset);
+    if (h > 0) root.setAttribute('data-toast-stack', '');
+    else root.removeAttribute('data-toast-stack');
+  }
+
+  function afterStackChange() {
+    requestAnimationFrame(syncChromeInsets);
   }
 
   function ensureStack() {
@@ -23,6 +37,10 @@ const KuiperToast = (() => {
     stackEl.setAttribute('aria-live', 'polite');
     stackEl.setAttribute('aria-relevant', 'additions');
     document.body.appendChild(stackEl);
+    if (!stackResizeObserver && typeof ResizeObserver !== 'undefined') {
+      stackResizeObserver = new ResizeObserver(() => syncChromeInsets());
+      stackResizeObserver.observe(stackEl);
+    }
     return stackEl;
   }
 
@@ -62,11 +80,18 @@ const KuiperToast = (() => {
     clearTimeout(Number(card.dataset.timerId) || 0);
     if (immediate) {
       card.remove();
+      syncChromeInsets();
+      afterStackChange();
       return;
     }
     card.classList.add('out');
-    card.addEventListener('animationend', () => card.remove(), { once: true });
-    setTimeout(() => card.remove(), 220);
+    const done = () => {
+      if (card.isConnected) card.remove();
+      syncChromeInsets();
+      afterStackChange();
+    };
+    card.addEventListener('animationend', done, { once: true });
+    setTimeout(done, 220);
   }
 
   function iconFor(type) {
@@ -118,6 +143,8 @@ const KuiperToast = (() => {
 
     card.append(body, actions);
     stack.appendChild(card);
+    syncChromeInsets();
+    afterStackChange();
 
     if (ms > 0) {
       const timerId = window.setTimeout(() => dismissCard(card), ms);

@@ -263,7 +263,6 @@ const KuiperUI = (() => {
 
   function cardLinkUrl(id) {
     const u = new URL(location.href);
-    u.searchParams.set('kuiper', '1');
     if (!u.searchParams.get('board')) u.searchParams.set('board', currentBoardSlug());
     const org = currentOrgSlug();
     if (org) u.searchParams.set('org', org);
@@ -774,7 +773,6 @@ const KuiperUI = (() => {
       const org = currentOrgSlug();
       if (org) {
         const u = new URL(location.href);
-        u.searchParams.set('kuiper', '1');
         u.searchParams.set('org', org);
         history.replaceState(null, '', `${u.pathname}${u.search}${u.hash}`);
       }
@@ -813,7 +811,6 @@ const KuiperUI = (() => {
       return;
     }
     const u = new URL(location.href);
-    u.searchParams.set('kuiper', '1');
     u.searchParams.set('org', org);
     history.replaceState(null, '', `${u.pathname}${u.search}${u.hash}`);
     if (boardView !== 'workspace') boardViewBeforeWorkspace = boardView;
@@ -1465,7 +1462,6 @@ const KuiperUI = (() => {
 
   function boardUrl(boardSlug, orgSlug) {
     const u = new URL(location.href);
-    u.searchParams.set('kuiper', '1');
     u.searchParams.set('board', boardSlug);
     if (orgSlug) u.searchParams.set('org', orgSlug);
     return u;
@@ -1520,7 +1516,6 @@ const KuiperUI = (() => {
       boardSlug = boards[0]?.slug || '';
     }
     const u = new URL(location.href);
-    u.searchParams.set('kuiper', '1');
     u.searchParams.set('org', orgSlug);
     if (boardSlug) u.searchParams.set('board', boardSlug);
     else u.searchParams.delete('board');

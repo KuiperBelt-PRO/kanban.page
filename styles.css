@@ -1214,8 +1214,9 @@ kbd {
   position: fixed;
   z-index: 400;
   right: 16px;
-  bottom: 16px;
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px) + var(--toast-stack-inset, 0px));
   display: flex;
+  transition: bottom .22s var(--ease);
   align-items: center;
   gap: 12px;
   max-width: min(calc(100vw - 32px), 390px);

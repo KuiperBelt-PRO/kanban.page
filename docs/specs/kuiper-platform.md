@@ -2,9 +2,11 @@
 
 **Alcance:** persistencia local, `kanban serve`, cliente `kuiper-store.js`, CLI `cli/kuiper/`.
 
-**Activación UI:** `?kuiper=1&board=<slug>&org=<org-slug>`.
+**Activación UI:** `?board=<slug>&org=<org-slug>` (servido por `kanban serve`).
 
-**Variables:** `KANBAN_DB_PATH`, `KUIPER_LOCAL_MODE=1`.
+**Variables:** `KANBAN_DB_PATH`, `KUIPER_LOCAL_MODE=1`, `KUIPER_DEFAULT_BOARD` (opcional; defecto `hub-delivery`).
+
+**`kanban serve`:** `GET /` o `/index.html` sin `board` responde **302** a `/?board=<defecto>`.
 
 ---
 

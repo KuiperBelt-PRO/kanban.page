@@ -412,7 +412,7 @@ stateDiagram-v2
 - Tipos: `.toast-card.is-info` (borde acento), `.is-warning` (lavado `--accent-wash`), `.is-error` (lavado `--danger`).
 - Cada tarjeta: icono semántico, mensaje, botón **Deshacer** opcional (`.toast-action`) y cierre **×** (`.toast-close`).
 - Auto-cierre por tiempo (API `toast(msg, action?, ms?, type?)`); `ms: 0` o `persist: true` en objeto opciones → solo cierre manual.
-- Módulo: `kuiper-toast.js` (`KuiperToast.toast`).
+- Módulo: `kuiper-toast.js` (`KuiperToast.toast`). Publica `--toast-stack-inset` en `html` para que `.update-notice` suba cuando hay toasts visibles.
 
 ### 7.10 Tooltip `.tip-bubble`
 

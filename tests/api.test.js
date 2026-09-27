@@ -70,6 +70,16 @@ describe('api', () => {
     assert.equal(res.body.ok, true);
   });
 
+  it('redirects bare index to kuiper UI when serve uses a database', async () => {
+    const res = await new Promise((resolve, reject) => {
+      http.get({ hostname: '127.0.0.1', port, path: '/index.html?ns=scratch' }, r => {
+        resolve({ status: r.statusCode, location: r.headers.location });
+      }).on('error', reject);
+    });
+    assert.equal(res.status, 302);
+    assert.equal(res.location, '/?board=hub-delivery');
+  });
+
   it('serves kuiper datetime picker static asset', async () => {
     const res = await new Promise((resolve, reject) => {
       http.get({ hostname: '127.0.0.1', port, path: '/kuiper-datetime-picker.js' }, r => {

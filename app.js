@@ -1,5 +1,4 @@
-/* board — local kanban for agent-driven work.
-   Everything lives in localStorage. No network, no build step. */
+/* board — Kuiper kanban (SQLite + API vía kanban serve). */
 
 /* ── helpers ───────────────────────────────────────────── */
 
@@ -37,9 +36,6 @@ let locale = 'en';
 try { locale = I.valid(localStorage.getItem(LOCALE_KEY)); } catch (err) { /* English fallback */ }
 const tr = (key, vars) => I.t(locale, key, vars);
 
-// ?ns=… gives a board its own storage. Tests use it; so can a scratch board.
-const NS = new URLSearchParams(location.search).get('ns');
-const KUIPER = new URLSearchParams(location.search).has('kuiper');
 function kuiperBoardSlugFromUrl() {
   return new URLSearchParams(location.search).get('board') || 'hub-delivery';
 }
@@ -52,13 +48,11 @@ function loadKuiperPrefs() {
 }
 
 function saveKuiperPrefs(prefs) {
-  if (!KUIPER) return;
   try { localStorage.setItem(KUIPER_PREFS_KEY, JSON.stringify(prefs)); }
   catch (err) { /* session-only */ }
 }
 
 function mergeKuiperDevicePrefs() {
-  if (!KUIPER) return;
   const prefs = loadKuiperPrefs();
   const urlTheme = new URLSearchParams(location.search).get('theme');
   if (urlTheme === 'dark' || urlTheme === 'light') state.theme = urlTheme;
@@ -69,66 +63,6 @@ function mergeKuiperDevicePrefs() {
   document.documentElement.dataset.theme = state.theme;
   document.documentElement.dataset.density = state.density;
 }
-const KEY = NS ? `board.v2.${NS}` : 'board.v2';
-const LEGACY_KEY = NS ? null : 'board.v1';
-
-// Device-local generations never travel through syncable(). Content answers
-// "merge or replace this tab's board?"; binding answers "which sync engine may
-// run?" They are separate so Combine preserves another tab's pending draft
-// while still shutting the old remote down immediately.
-const ZERO_GEN = Object.freeze({ at: 0, id: '' });
-const localGen = (st, key) => {
-  const g = st && st[key];
-  return g && Number.isFinite(g.at) && typeof g.id === 'string' ? g : ZERO_GEN;
-};
-const compareGen = (a, b) => (a.at || 0) - (b.at || 0) || String(a.id || '').localeCompare(String(b.id || ''));
-const sameGen = (a, b) => compareGen(a, b) === 0;
-const maxGen = (a, b) => compareGen(a, b) >= 0 ? a : b;
-const nextGen = (...held) => ({
-  at: Math.max(Date.now(), ...held.map(g => (g && g.at || 0) + 1)),
-  id: C.uid(),
-});
-const contentGenOf = st => localGen(st, '_contentGen');
-const bindingGenOf = st => localGen(st, '_bindingGen');
-
-/** First ever run: one card, so the session line is discoverable. `seed`
-    marks the board replaceable when a sync link adopts it — stampChanges
-    clears it on the first real change, so content is never inferred. */
-function firstRun() {
-  const s = C.defaultBoard(locale);
-  s.seed = true;
-  const now = Date.now();
-  const t = {
-    id: C.uid(),
-    title: locale === 'es' ? 'Arrástrame a otra etapa' : 'Drag me to another stage',
-    notes: '',
-    projectId: null,
-    session: 'claude --resume 2d2bb76b-e6df-46c5-b742-8eab8c3c7303',
-    flag: false,
-    columnId: s.columns[1].id,
-    order: 0,
-    createdAt: now,
-    updatedAt: now,
-  };
-  s.tasks.push(t);
-  s.events.push(C.makeEvent(
-    { taskId: t.id, title: t.title, type: 'created', from: null, to: s.columns[1].name },
-    { now }
-  ));
-  return s;
-}
-
-function load() {
-  if (KUIPER) return C.defaultBoard(locale);
-  let raw = null;
-  try {
-    raw = JSON.parse(localStorage.getItem(KEY) || (LEGACY_KEY && localStorage.getItem(LEGACY_KEY)) || 'null');
-  } catch (err) {
-    console.warn('board: could not read storage —', err);
-  }
-  return raw ? C.migrate(raw) : firstRun();
-}
-
 async function kuiperBackfillTaskIssueFields(boardState) {
   const tasks = boardState?.tasks || [];
   if (!tasks.length) return;
@@ -181,7 +115,7 @@ function resetKuiperOrgContext(org) {
 }
 
 async function loadKuiperBoard() {
-  if (!KUIPER || typeof KuiperStore === 'undefined') return;
+  if (typeof KuiperStore === 'undefined') return;
   const prefs = loadKuiperPrefs();
   const data = await KuiperStore.loadBoard(kuiperBoardSlugFromUrl());
   state = C.migrate(data);
@@ -206,7 +140,7 @@ function kuiperStampTaskInLastSaved(task) {
 }
 
 async function kuiperPushCardPatch(prev, task) {
-  if (!KUIPER || typeof KuiperStore === 'undefined' || typeof KuiperUI === 'undefined') return;
+  if (typeof KuiperStore === 'undefined' || typeof KuiperUI === 'undefined') return;
   const patch = KuiperUI.buildCardPatch(prev, task);
   if (!Object.keys(patch).length) return;
   await KuiperStore.patchCard(task.id, patch);
@@ -231,7 +165,7 @@ function queueKuiperCardPatch(prev, task) {
 }
 
 async function kuiperSyncToServer() {
-  if (!KUIPER || typeof KuiperStore === 'undefined') return;
+  if (typeof KuiperStore === 'undefined') return;
   await kuiperSaveChain;
   const prevTasks = new Map((lastStamped.tasks || []).map(t => [t.id, t]));
   for (const t of state.tasks || []) {
@@ -247,7 +181,6 @@ async function kuiperSyncToServer() {
 }
 
 function refreshKuiperBoard() {
-  if (!KUIPER) return;
   loadKuiperBoard().then(() => render()).catch(err => {
     console.warn('kuiper refresh failed —', err);
     toast(locale === 'es' ? 'No se pudo refrescar el tablero' : 'Could not refresh board', null, 5000, 'error');
@@ -281,11 +214,7 @@ function applyLocale() {
   $('#proj-name').placeholder = tr('newProject'); $('#proj-add button').textContent = tr('add');
   $('#archive').setAttribute('aria-label', tr('archive')); $('#archive h2').textContent = tr('archive');
   $('#arch-empty').textContent = tr('deleteAll');
-  const menuText = { projects: tr('projects'), archive: tr('archive'), theme: tr('theme'), addcol: tr('addStage'), sortproj: tr('sortProject'), export: tr('export'), import: tr('import'), sync: tr('syncDevices') };
-  $('#syncTitle').textContent = tr('sync');
-  $('[data-close]', $('#sync')).title = tr('close');
-  $('#sync-copy').title = tr('copy');
-  $('#sync-url').setAttribute('aria-label', tr('pairingLink'));
+  const menuText = { projects: tr('projects'), archive: tr('archive'), theme: tr('theme'), addcol: tr('addStage'), sortproj: tr('sortProject'), export: tr('export'), import: tr('import') };
   Object.entries(menuText).forEach(([act, label]) => {
     const b = $(`[data-act="${act}"]`); if (b) b.childNodes[0].textContent = label;
   });
@@ -301,19 +230,18 @@ function setLocale(next) {
   if (next === locale) return;
   locale = next;
   try { localStorage.setItem(LOCALE_KEY, locale); } catch (err) { /* session-only */ }
-  if (KUIPER) saveKuiperPrefs({ ...loadKuiperPrefs(), locale });
+  saveKuiperPrefs({ ...loadKuiperPrefs(), locale });
   applyLocale();
-  if (KUIPER && typeof KuiperUI !== 'undefined') KuiperUI.onLocale();
+  if (typeof KuiperUI !== 'undefined') KuiperUI.onLocale();
   render();
   if (!editor.hidden) openEditor(editing === 'new' ? null : editing);
   if (!panel.hidden) renderProjects();
   if (!archiveEl.hidden) renderArchive();
   if (!reportEl.hidden) renderReport(false);
-  if (!$('#sync').hidden) renderSync();
   $('#menuBtn').focus();
 }
 
-let state = load();
+let state = C.defaultBoard(locale);
 applyLocale();
 let saveTimer = null;
 
@@ -323,58 +251,15 @@ let saveTimer = null;
 // without a single touch() call anywhere else.
 let lastStamped = clone(state);
 
-function writeStateNow() {
-  if (KUIPER) return true;
-  try {
-    localStorage.setItem(KEY, JSON.stringify(state));
-    return true;
-  } catch (err) {
-    console.warn('board: could not write storage —', err);
-    toast(tr('storageUnavailable'), null, 8000, 'error');
-    return false;
-  }
-}
-
-function installLocalState(next) {
-  const migrated = C.migrate(next);
-  try {
-    localStorage.setItem(KEY, JSON.stringify(migrated));
-  } catch (err) {
-    console.warn('board: could not write storage —', err);
-    toast(tr('storageUnavailable'), null, 8000, 'error');
-    return false;
-  }
-  state = migrated;
-  lastStamped = clone(state);
-  return true;
-}
-
-function linkedReplacement(remote) {
-  const prefs = {
-    theme: state.theme,
-    density: state.density,
-    flagFilter: !!state.flagFilter,
-    filter: state.filter,
-  };
-  const next = C.migrate({ ...state, ...clone(remote), ...prefs });
-  if (next.filter && !(next.projects || []).some(p => p.id === next.filter)) next.filter = null;
-  delete next.seed;
-  return next;
-}
+function flushExternal() {}
 
 function flushSave() {
   clearTimeout(saveTimer);
   C.stampChanges(lastStamped, state);
-  if (KUIPER) {
-    (async () => {
-      await kuiperSaveChain;
-      await kuiperSyncToServer();
-    })().catch(err => console.warn('kuiper save failed —', err));
-    return;
-  }
-  lastStamped = clone(state);
-  writeStateNow();
-  if (sync) schedulePush();
+  (async () => {
+    await kuiperSaveChain;
+    await kuiperSyncToServer();
+  })().catch(err => console.warn('kuiper save failed —', err));
 }
 
 function save() {
@@ -392,795 +277,6 @@ function flushPendingSave() {
   flushSave();
 }
 
-/* ── tab sync ──────────────────────────────────────────────
-   Another same-origin tab saved this board; fold its write into ours. A
-   merge, not a replace: this tab may hold edits still inside the save
-   debounce, and a replace would silently drop them. Deferred while a drag is
-   mid-air (the rebuild would yank the card) or a composer is open (the
-   rebuild recreates the textarea empty, and its blur guard would discard the
-   words) — the next settle applies the latest write. */
-
-let pendingExternal = null;
-
-function queueExternal(external) {
-  if (!pendingExternal) {
-    pendingExternal = clone(external);
-    return;
-  }
-  const heldContent = contentGenOf(pendingExternal);
-  const heldBinding = bindingGenOf(pendingExternal);
-  const nextContent = contentGenOf(external);
-  const nextBinding = bindingGenOf(external);
-  const cmp = compareGen(nextContent, heldContent);
-  if (cmp > 0) pendingExternal = clone(external);
-  else if (cmp === 0) pendingExternal = C.merge(pendingExternal, external);
-  pendingExternal._contentGen = clone(maxGen(heldContent, nextContent));
-  pendingExternal._bindingGen = clone(maxGen(heldBinding, nextBinding));
-}
-
-function applyExternal(rawJson) {
-  let raw = null;
-  try { raw = JSON.parse(rawJson); } catch (err) { return; }
-  if (!raw) return;
-  const external = C.migrate(raw);
-  const contentCmp = compareGen(contentGenOf(external), contentGenOf(state));
-  const bindingCmp = compareGen(bindingGenOf(external), bindingGenOf(state));
-
-  // Relationship transitions stop the old wire immediately, even if an open
-  // editor makes the visual replacement wait. Otherwise that editor could
-  // settle Y's board and an old tab would still upload it to X.
-  if (bindingCmp > 0) {
-    syncBindingSuspended = true;
-    suspendSyncRuntime();
-  }
-  if (syncBusy()) { queueExternal(external); return; }
-
-  if (contentCmp <= 0) {
-    C.stampChanges(lastStamped, state, undefined, external.tombstones);
-  }
-  if (contentCmp > 0) {
-    state = linkedReplacement(external);
-  } else if (contentCmp === 0) {
-    state = C.merge(state, external);
-  } // lower content generation is a stale pre-replacement write: ignore it
-
-  state._contentGen = clone(maxGen(contentGenOf(state), contentGenOf(external)));
-  state._bindingGen = clone(maxGen(bindingGenOf(state), bindingGenOf(external)));
-  lastStamped = clone(state);
-  render();
-  if (!panel.hidden) renderProjects();
-  if (!archiveEl.hidden) renderArchive();
-  if (!reportEl.hidden) renderReport(false);
-
-  const differs = C.canon(C.syncable(state)) !== C.canon(C.syncable(external))
-    || !sameGen(contentGenOf(state), contentGenOf(external))
-    || !sameGen(bindingGenOf(state), bindingGenOf(external));
-  // A lower-generation tab already overwrote localStorage. Re-persisting the
-  // winner is mandatory, not an optimization. Equal-generation unions use
-  // the same write-back and terminate when every tab holds the same board.
-  if (differs) {
-    writeStateNow();
-    if (sync && sameGen(bindingGenOf(sync), bindingGenOf(state))) schedulePush();
-  }
-  if (bindingCmp !== 0 || contentCmp !== 0) reconcileStoredSync();
-}
-
-function flushExternal() {
-  if (pendingExternal != null) {
-    const queued = pendingExternal;
-    pendingExternal = null;
-    applyExternal(JSON.stringify(queued));
-  }
-  if (pendingRemote != null && sync) {
-    const p = pendingRemote;
-    pendingRemote = null;
-    applyRemote(p.remote, p.ver, p.ctx);
-  }
-}
-
-window.addEventListener('storage', e => {
-  if (e.key === KEY && e.newValue != null) applyExternal(e.newValue);
-  if (e.key === SYNC_KEY) reconcileStoredSync();
-});
-
-/* ── device sync ───────────────────────────────────────────
-   No accounts. A 256-bit secret pairs the devices; HKDF splits it into the
-   bearer token the relay sees and the AES key it never sees, so the relay
-   stores only ciphertext under a hash (see relay/worker.js and
-   docs/sync-spec.md). The engine pushes after every save, pulls on
-   focus/visibility, and holds a WebSocket so another device's edit lands
-   here in about a second. Remote updates converge through C.merge; an
-   explicit Join/Replace is the only path that replaces local board data. */
-
-const RELAY = 'https://kanban-relay.quiet-bush-25b1.workers.dev';
-const SYNC_KEY = NS ? `board.sync.${NS}` : 'board.sync';
-
-let sync = null;        // { secret, ver } — presence = the feature is on
-let syncKeys = null;    // { secret, token, key } derived from the active secret
-let syncStatus = 'off'; // off | ok | syncing | offline | error
-let syncedAt = null;    // epoch ms of the last successful exchange
-let remoteHead = '';    // serialized syncable known to equal the server head
-let rejectedPayload = ''; // exact payload rejected as too large; retry only after change
-// The floor: events and tombstones known to have reached the relay. Unioned
-// into every push, so no snapshot PUT — an import, an undo — can ever shrink
-// the log or drop a tombstone from the server (the log only grows).
-let floor = null;
-let pendingRemote = null;
-// True from an explicit Combine until its first push lands: the linked
-// board's stage order wins rather than whichever clock happens to be higher.
-let joiningOrder = false;
-let pushTimer = null, pushing = false, pullQueued = false, pulling = false;
-let syncRetryTimer = null, syncRetryAttempt = 0;
-let watchSock = null, watchRetry = 0;
-let uiDragLock = 0;     // column and project-row drags hold this
-let syncRuntimeEpoch = 0;
-let syncBindingSuspended = false;
-
-try {
-  const held = JSON.parse(localStorage.getItem(SYNC_KEY) || 'null');
-  if (held && sameGen(bindingGenOf(held), bindingGenOf(state))) sync = held;
-} catch (err) { /* off */ }
-
-const captureSync = () => sync ? {
-  epoch: syncRuntimeEpoch,
-  secret: sync.secret,
-  binding: clone(bindingGenOf(sync)),
-} : null;
-const isCurrentSync = ctx => !!(ctx && sync
-  && !syncBindingSuspended
-  && ctx.epoch === syncRuntimeEpoch
-  && ctx.secret === sync.secret
-  && sameGen(ctx.binding, bindingGenOf(sync))
-  && sameGen(ctx.binding, bindingGenOf(state)));
-
-/** Invalidate every callback/request from the old relationship before board
-    state can change underneath it. The persisted config is handled by the
-    caller; this only cuts the live wire. */
-function suspendSyncRuntime() {
-  syncRuntimeEpoch++;
-  clearTimeout(pushTimer);
-  pushTimer = null;
-  clearSyncRetry();
-  dropWatch();
-  pushing = false;
-  pulling = false;
-  pullQueued = false;
-}
-
-function saveSyncConfig() {
-  try {
-    if (sync) localStorage.setItem(SYNC_KEY, JSON.stringify(sync));
-    else localStorage.removeItem(SYNC_KEY);
-  } catch (err) { /* sync still works this session */ }
-}
-
-function clearSyncMemory() {
-  sync = null;
-  syncKeys = null;
-  remoteHead = '';
-  rejectedPayload = '';
-  floor = null;
-  pendingRemote = null;
-  joiningOrder = false;
-  syncBindingSuspended = false;
-}
-
-let reconcilingSyncStorage = false;
-function reconcileStoredSync() {
-  if (reconcilingSyncStorage) return;
-  reconcilingSyncStorage = true;
-  try {
-    let rawBoard = null, config = null;
-    try {
-      rawBoard = localStorage.getItem(KEY);
-      config = JSON.parse(localStorage.getItem(SYNC_KEY) || 'null');
-    } catch (err) { /* safest state is off */ }
-
-    if (rawBoard) {
-      let stored = null;
-      try { stored = C.migrate(JSON.parse(rawBoard)); } catch (err) { /* keep live board */ }
-      if (stored && (!sameGen(contentGenOf(stored), contentGenOf(state))
-          || !sameGen(bindingGenOf(stored), bindingGenOf(state)))) {
-        applyExternal(rawBoard);
-        if (pendingExternal) return; // barrier holds state; old runtime is already suspended
-      }
-    }
-
-    // The board is the commit record. A stale tab can finish an old-X request
-    // just after another tab commits Y and overwrite only SYNC_KEY with X's
-    // lower binding. If this runtime still owns the board's winning binding,
-    // reject that config write and restore the matching relationship. A real
-    // Disconnect writes a newer board binding first, so it cannot enter here.
-    const currentOwnsBoard = sync && sameGen(bindingGenOf(sync), bindingGenOf(state));
-    const configDisagrees = !config
-      || !sameGen(bindingGenOf(config), bindingGenOf(state))
-      || (currentOwnsBoard && config.secret !== sync.secret);
-    if (currentOwnsBoard && configDisagrees) {
-      syncBindingSuspended = false;
-      saveSyncConfig();
-      connectWatch();
-      return;
-    }
-
-    if (!config || !sameGen(bindingGenOf(config), bindingGenOf(state))) {
-      if (sync) suspendSyncRuntime();
-      clearSyncMemory();
-      setSyncStatus('off');
-      if (!syncEl.hidden) { syncView = 'off'; renderSync(); focusSyncState(); }
-      return;
-    }
-
-    if (sync && sync.secret === config.secret
-        && sameGen(bindingGenOf(sync), bindingGenOf(config))) {
-      syncBindingSuspended = false;
-      // Do not copy a newer version into memory before pulling it: pull uses
-      // the old number to recognize that the remote head must be applied.
-      if (config.ver !== sync.ver) pull();
-      else connectWatch();
-      return;
-    }
-
-    suspendSyncRuntime();
-    sync = config;
-    syncBindingSuspended = false;
-    syncKeys = null;
-    remoteHead = '';
-    rejectedPayload = '';
-    floor = null;
-    setSyncStatus('syncing');
-    reflectExternalBinding(config.secret);
-    connectWatch();
-    pull();
-  } finally {
-    reconcilingSyncStorage = false;
-  }
-}
-
-async function keysForContext(ctx) {
-  if (!ctx) throw new Error('sync stopped');
-  if (syncKeys && syncKeys.secret === ctx.secret) return syncKeys;
-  const derived = { secret: ctx.secret, ...(await C.deriveSync(ctx.secret)) };
-  if (!isCurrentSync(ctx)) throw new Error('stale sync');
-  syncKeys = derived;
-  return derived;
-}
-
-async function relayFetch(method, body, opts = {}, ctx = captureSync()) {
-  if (!ctx) throw new Error('sync stopped');
-  const derived = await keysForContext(ctx);
-  return fetch(`${RELAY}/v1/board`, {
-    method,
-    headers: {
-      Authorization: `Bearer ${derived.token}`,
-      ...(body ? { 'Content-Type': 'application/json' } : {}),
-    },
-    body: body ? JSON.stringify(body) : undefined,
-    keepalive: !!opts.keepalive,
-  });
-}
-
-function setSyncStatus(s) {
-  syncStatus = s;
-  renderSyncStatus();
-}
-
-/* One interaction barrier for every surface a rebuild would trample: card /
-   column / project drags, the composer, the open editor (its draft is a
-   stale clone — applying under it would let a later save clobber the remote
-   edit), an inline stage rename, a project rename, a report date edit.
-   Remote payloads are still fetched and queued; they apply on settle. */
-function syncBusy() {
-  return !!drag || uiDragLock > 0 || composerCol !== null || !editor.hidden
-  || (!reportEl.hidden && !!reportEl.querySelector('input[type="date"]'))
-  || !!(document.activeElement && (
-    document.activeElement.classList.contains('col-name')
-    || (!panel.hidden && document.activeElement.matches('#proj-list input'))));
-}
-
-const syncableStr = st => C.canon(C.syncable(st));
-/** merge(x, x) is a no-op that normalizes ordering — for comparisons only. */
-const normalized = payload => C.canon(C.syncable(C.merge(payload, payload)));
-
-/** Fold a decrypted remote payload into the live board — a merge, never a
-    replace, deferred while the interaction barrier is up. */
-function applyRemote(remote, ver, ctx = captureSync()) {
-  if (!isCurrentSync(ctx)) return;
-  if (C.validateSyncable(remote)) { setSyncStatus('error'); return; } // a newer app, or a damaged payload
-  floor = { events: remote.events || [], tombstones: remote.tombstones || {} };
-  if (syncBusy()) { pendingRemote = { remote, ver, ctx }; return; }
-  sync.ver = ver;
-  saveSyncConfig();
-  C.stampChanges(lastStamped, state, undefined, remote.tombstones); // pending drafts can explicitly restore
-  const before = syncableStr(state);
-  // While joining a board, its stage order wins — including through a 409
-  // retry, which lands back here before the adoption has settled.
-  const merged = C.merge(state, remote, joiningOrder ? { preferOrder: 'remote' } : {});
-  remoteHead = normalized(remote);
-  state = merged;
-  lastStamped = clone(state);
-  if (syncableStr(state) !== before) {
-    render();
-    if (!panel.hidden) renderProjects();
-    if (!archiveEl.hidden) renderArchive();
-    if (!reportEl.hidden) renderReport(false);
-  }
-  save(); // persist the union; schedules a push-back only if we knew more
-  const current = syncableStr(state);
-  setSyncStatus(current === rejectedPayload && current !== remoteHead ? 'error' : 'ok');
-  syncedAt = Date.now();
-}
-
-function schedulePush(ms = 1200) {
-  if (!sync) return;
-  if (syncableStr(state) === rejectedPayload) return;
-  clearTimeout(pushTimer);
-  pushTimer = setTimeout(() => push(), ms);
-}
-
-function clearSyncRetry(reset = true) {
-  clearTimeout(syncRetryTimer);
-  syncRetryTimer = null;
-  if (reset) syncRetryAttempt = 0;
-}
-
-/** Retry transport failures independently of the WebSocket: an HTTP request
-    can fail while the live socket still looks open. One bounded backoff loop
-    per tab is enough; pull first so a stale writer never blind-writes. */
-function scheduleSyncRetry() {
-  if (!sync || syncRetryTimer) return;
-  const delay = Math.min(30000, 1000 * 2 ** syncRetryAttempt++);
-  syncRetryTimer = setTimeout(() => {
-    syncRetryTimer = null;
-    if (!sync) return;
-    flushExternal();
-    connectWatch();
-    pull();
-  }, delay);
-}
-
-function retrySyncNow() {
-  if (!sync) return;
-  clearSyncRetry(false);
-  flushExternal();
-  connectWatch();
-  pull();
-}
-
-async function push(opts = {}) {
-  const ctx = captureSync();
-  if (!isCurrentSync(ctx)) return;
-  if (pushing) { schedulePush(600); return; }
-  if (pendingRemote) { schedulePush(1000); return; } // merge the held remote first
-  // Never blind-write over a head this session has not seen: the floor is
-  // what guarantees a snapshot cannot shrink the relay's history.
-  if ((sync.ver || 0) > 0 && !floor) { schedulePush(1500); pull(); return; }
-  C.stampChanges(lastStamped, state);
-  lastStamped = clone(state);
-  if (floor) {
-    // events and tombstones only — see unionFloor. This used to go through
-    // merge() with an otherwise-empty board, which sorted the real stages by
-    // id and moved the done line on any board whose stage clock was still 0.
-    state = C.unionFloor(state, floor);
-    lastStamped = clone(state);
-  }
-  if (syncableStr(state) === rejectedPayload) { setSyncStatus('error'); return; }
-  if (syncableStr(state) === remoteHead) {
-    joiningOrder = false; // nothing to send: the adoption has settled too
-    clearSyncRetry();
-    setSyncStatus('ok');
-    return;
-  }
-  pushing = true;
-  setSyncStatus('syncing');
-  try {
-    for (let attempt = 0; attempt < 3 && isCurrentSync(ctx); attempt++) {
-      const payload = C.syncable(state);
-      const snap = C.canon(payload);
-      const { key } = await keysForContext(ctx);
-      if (!isCurrentSync(ctx)) return;
-      const env = await C.seal(key, payload);
-      if (!isCurrentSync(ctx)) return;
-      const res = await relayFetch('PUT', { baseVer: sync.ver || 0, env }, opts, ctx);
-      if (!isCurrentSync(ctx)) return;
-      if (res.status === 200) {
-        const accepted = await res.json();
-        if (!isCurrentSync(ctx)) return;
-        sync.ver = accepted.ver;
-        saveSyncConfig();
-        remoteHead = snap;
-        rejectedPayload = '';
-        floor = { events: payload.events, tombstones: payload.tombstones };
-        joiningOrder = false; // the adoption has settled
-        clearSyncRetry();
-        setSyncStatus('ok');
-        syncedAt = Date.now();
-        if (syncableStr(state) !== snap) schedulePush(300); // edits landed mid-flight
-        return;
-      }
-      if (res.status === 409) {
-        // Someone else wrote first: fold their head in, then retry from it.
-        const head = await res.json();
-        if (!isCurrentSync(ctx)) return;
-        const remote = head.env ? await C.unseal(key, head.env) : null;
-        if (!isCurrentSync(ctx)) return;
-        if (remote) applyRemote(remote, head.ver, ctx);
-        else { sync.ver = head.ver; saveSyncConfig(); }
-        if (pendingRemote) return; // the barrier holds the merge; settle resumes
-        continue;
-      }
-      if (res.status === 410) { syncLost(); return; }
-      if (res.status === 413) {
-        rejectedPayload = snap;
-        clearSyncRetry();
-        setSyncStatus('error');
-        return; // permanent until the board changes and schedules a fresh push
-      }
-      throw new Error(`relay ${res.status}`);
-    }
-    if (isCurrentSync(ctx)) scheduleSyncRetry(); // repeated contention
-  } catch (err) {
-    if (!isCurrentSync(ctx)) return;
-    setSyncStatus('offline');
-    scheduleSyncRetry();
-  } finally {
-    if (ctx.epoch === syncRuntimeEpoch) pushing = false;
-  }
-}
-
-async function pull() {
-  if (!sync || pulling) { pullQueued = !!sync; return; }
-  const ctx = captureSync();
-  if (!isCurrentSync(ctx)) return;
-  pulling = true;
-  try {
-    const res = await relayFetch('GET', null, {}, ctx);
-    if (!isCurrentSync(ctx)) return;
-    if (res.status === 404) {
-      if ((sync.ver || 0) > 0) { syncLost(); return; }
-      schedulePush(0); // fresh enable — nothing on the server yet, seed it
-      return;
-    }
-    if (res.status === 410) { syncLost(); return; }
-    if (!res.ok) throw new Error(`relay ${res.status}`);
-    const { ver, env } = await res.json();
-    if (!isCurrentSync(ctx)) return;
-    const { key } = await keysForContext(ctx);
-    if (!isCurrentSync(ctx)) return;
-    const remote = await C.unseal(key, env);
-    if (!isCurrentSync(ctx)) return;
-    syncedAt = Date.now();
-    if (ver !== sync.ver) {
-      applyRemote(remote, ver, ctx);
-    } else {
-      floor = { events: remote.events || [], tombstones: remote.tombstones || {} };
-      remoteHead = normalized(remote);
-      const current = syncableStr(state);
-      if (current === remoteHead) {
-        clearSyncRetry();
-        setSyncStatus('ok');
-      } else if (current === rejectedPayload) {
-        setSyncStatus('error'); // focus/pull must not disguise a blocked 413
-      } else {
-        setSyncStatus('ok');
-        schedulePush(300);
-      }
-    }
-  } catch (err) {
-    if (!isCurrentSync(ctx)) return;
-    setSyncStatus('offline');
-    scheduleSyncRetry();
-  } finally {
-    if (ctx.epoch === syncRuntimeEpoch) {
-      pulling = false;
-      if (pullQueued) { pullQueued = false; pull(); }
-    }
-  }
-}
-
-/* The live channel: the relay broadcasts {ver} on every accepted write, and
-   a newer ver triggers a pull. The socket stays open while the page is open
-   — hidden tabs included, so a laptop behind another window is current the
-   moment you look at it; a phone OS freezes the tab and the visibility pull
-   covers re-entry. */
-
-function connectWatch() {
-  const ctx = captureSync();
-  if (!isCurrentSync(ctx) || watchSock) return;
-  keysForContext(ctx).then(({ token }) => {
-    if (!isCurrentSync(ctx) || watchSock) return;
-    let ws;
-    try {
-      ws = new WebSocket(`${RELAY.replace(/^http/, 'ws')}/v1/board/watch`, ['kanban.v1', token]);
-    } catch (err) { return; }
-    watchSock = ws;
-    // `live` vs `synced` is the difference between "a change will arrive" and
-    // "I will go and ask", so the footer has to hear the socket settle.
-    ws.onopen = () => {
-      if (!isCurrentSync(ctx) || watchSock !== ws) { try { ws.close(); } catch (err) { /* stale */ } return; }
-      watchRetry = 0;
-      renderSyncStatus();
-    };
-    ws.onmessage = e => {
-      if (!isCurrentSync(ctx) || watchSock !== ws) return;
-      let m;
-      try { m = JSON.parse(e.data); } catch (err) { return; }
-      if (m.deleted) { syncLost(); return; }
-      if (m.ver !== sync.ver) pull();
-    };
-    ws.onclose = () => {
-      if (!isCurrentSync(ctx) || watchSock !== ws) return;
-      watchSock = null;
-      renderSyncStatus();
-      setTimeout(() => { if (isCurrentSync(ctx)) connectWatch(); }, Math.min(30000, 1000 * 2 ** watchRetry++));
-    };
-    ws.onerror = () => { try { ws.close(); } catch (err) { /* closing */ } };
-  }).catch(() => { /* a pull/retry reports transport state */ });
-}
-
-function dropWatch() {
-  if (!watchSock) return;
-  const ws = watchSock;
-  watchSock = null;   // onclose sees the mismatch and stays quiet
-  ws.onclose = null;
-  try { ws.close(); } catch (err) { /* closing */ }
-}
-
-/* Fallback heartbeat: only does work when the socket is down; also retries
-   any apply the interaction barrier deferred. */
-setInterval(() => {
-  if (!sync) return;
-  flushExternal();
-  if (!watchSock || watchSock.readyState !== 1) { connectWatch(); pull(); }
-}, 30000);
-
-document.addEventListener('visibilitychange', () => {
-  if (!sync) return;
-  if (document.hidden) {
-    // Best effort: get the last edits out before the tab is frozen.
-    flushPendingSave();
-    if (syncableStr(state) !== remoteHead) push({ keepalive: true });
-  } else {
-    retrySyncNow();
-  }
-});
-window.addEventListener('focus', retrySyncNow);
-window.addEventListener('online', retrySyncNow);
-// A tab closed inside the save debounce must not lose its last edit.
-window.addEventListener('pagehide', () => {
-  flushPendingSave();
-  if (sync && syncableStr(state) !== remoteHead) push({ keepalive: true });
-});
-
-/* ── sync lifecycle ───────────────────────────────────── */
-
-async function enableSync() {
-  suspendSyncRuntime();
-  state._bindingGen = nextGen(bindingGenOf(state));
-  lastStamped = clone(state);
-  if (!writeStateNow()) return false;
-  sync = { secret: C.randomSecret(), ver: 0, _bindingGen: clone(bindingGenOf(state)) };
-  syncKeys = null;
-  remoteHead = '';
-  rejectedPayload = '';
-  floor = null;
-  saveSyncConfig();
-  await push();
-  if (!remoteHead) return false; // the first PUT never landed
-  connectWatch();
-  return true;
-}
-
-/** Forget the secret on this device only; other devices keep syncing. */
-function syncStopped(msg) {
-  const oldSecret = sync && sync.secret;
-  if (sync) {
-    flushPendingSave();
-    suspendSyncRuntime();
-    state._bindingGen = nextGen(bindingGenOf(state), bindingGenOf(sync));
-    lastStamped = clone(state);
-    writeStateNow(); // board first: a crash cannot run old X against new state
-  }
-  clearSyncMemory();
-  saveSyncConfig();
-  setSyncStatus('off');
-  if (!$('#sync').hidden) { syncView = 'off'; renderSync(); focusSyncState(); }
-  if (msg) toast(msg, null, 8000);
-  return oldSecret;
-}
-
-/* "Failure is quiet" is right for a dropped connection and wrong for a
-   permanent one. A board deleted from another device will never sync again,
-   and retrying it silently forever tells the user they are synced when they
-   are not — so this speaks once, then stops. */
-let saidSyncLost = false;
-function syncLost() {
-  if (sync) {
-    suspendSyncRuntime();
-    state._bindingGen = nextGen(bindingGenOf(state), bindingGenOf(sync));
-    lastStamped = clone(state);
-    writeStateNow();
-  }
-  clearSyncMemory();
-  saveSyncConfig();
-  setSyncStatus('gone');
-  if (!$('#sync').hidden) { syncView = 'off'; renderSync(); focusSyncState(); }
-  if (!saidSyncLost) { saidSyncLost = true; toast(tr('syncLost'), null, 8000, 'error'); }
-}
-
-/** Wipe the relay copy — durable: the slot answers 410 from then on, and
-    every synced device sees the broadcast and stops. */
-async function deleteFromServer() {
-  const ctx = captureSync();
-  if (!isCurrentSync(ctx)) return false;
-  try {
-    const res = await relayFetch('DELETE', null, {}, ctx);
-    if (!isCurrentSync(ctx)) return false;
-    if (res.status !== 204 && res.status !== 410) throw new Error(`relay ${res.status}`);
-    syncStopped(); // forget the key only after the relay confirms the outcome
-    return true;
-  } catch (err) {
-    if (!isCurrentSync(ctx)) return false;
-    setSyncStatus('offline');
-    return false;
-  }
-}
-
-const syncLink = () => {
-  const base = location.origin === 'null'
-    ? 'https://kanban.page/app/'
-    : location.origin + location.pathname + location.search; // keep ?ns=
-  return `${base}#sync=${sync.secret}`;
-};
-
-/* Candidate inspection is deliberately side-effect free. It never borrows
-   the active sync globals: a bad Y link cannot knock this device off X, and a
-   late candidate response cannot act after Cancel or another link. */
-let pendingSecret = null;
-let pendingCandidate = null;
-let joinAttempt = 0;
-
-function reflectExternalBinding(secret) {
-  if ($('#sync').hidden) return;
-  const candidate = pendingSecret;
-  joinAttempt++;
-  pendingSecret = null;
-  pendingCandidate = null;
-  syncNoticeKey = candidate === secret ? 'alreadyConnected' : null;
-  syncView = candidate && candidate !== secret ? 'blocked' : 'on';
-  renderSync();
-  focusSyncState();
-}
-
-const permanentCandidateError = message => Object.assign(new Error(message), { permanent: true });
-const candidateBoardShape = raw => {
-  if (!raw || typeof raw !== 'object' || (raw.v || 2) > 2) return false;
-  if (!Array.isArray(raw.columns) || !raw.columns.length
-      || !raw.columns.every(c => c && typeof c.id === 'string' && typeof c.name === 'string')) return false;
-  if (!Array.isArray(raw.projects)
-      || !raw.projects.every(p => p && typeof p.id === 'string' && typeof p.name === 'string')) return false;
-  if (!Array.isArray(raw.tasks)
-      || !raw.tasks.every(t => t && typeof t.id === 'string'
-        && typeof t.title === 'string' && typeof t.columnId === 'string')) return false;
-  if (!Array.isArray(raw.events)
-      || !raw.events.every(e => e && typeof e.id === 'string' && typeof e.taskId === 'string')) return false;
-  return !raw.tombstones || (typeof raw.tombstones === 'object' && !Array.isArray(raw.tombstones));
-};
-
-async function inspectCandidate(secret) {
-  if (sync) {
-    pendingSecret = null;
-    pendingCandidate = null;
-    joinAttempt++;
-    syncView = secret === sync.secret ? 'on' : 'blocked';
-    syncNoticeKey = secret === sync.secret ? 'alreadyConnected' : null;
-    if ($('#sync').hidden) openSync(syncView);
-    else { renderSync(); focusSyncState(); }
-    return;
-  }
-
-  const attempt = ++joinAttempt;
-  pendingSecret = secret;
-  pendingCandidate = null;
-  syncView = 'checking';
-  if ($('#sync').hidden) openSync('checking');
-  else { renderSync(); focusSyncState(); }
-
-  try {
-    if (!/^[A-Za-z0-9_-]{43}$/.test(secret) || C.b64uToBytes(secret).length !== 32) {
-      throw permanentCandidateError('bad secret');
-    }
-    const keys = await C.deriveSync(secret);
-    if (attempt !== joinAttempt || sync) return;
-    let res;
-    try {
-      res = await fetch(`${RELAY}/v1/board`, {
-        method: 'GET',
-        headers: { Authorization: `Bearer ${keys.token}` },
-      });
-    } catch (err) {
-      throw Object.assign(err, { retryable: true });
-    }
-    if (attempt !== joinAttempt || sync) return;
-    if ([408, 429].includes(res.status) || res.status >= 500) {
-      throw Object.assign(new Error(`relay ${res.status}`), { retryable: true });
-    }
-    if (!res.ok) throw permanentCandidateError(`relay ${res.status}`);
-
-    let head;
-    try { head = await res.json(); } catch (err) { throw permanentCandidateError('bad response'); }
-    if (attempt !== joinAttempt || sync) return;
-    if (!head || !Number.isSafeInteger(head.ver) || head.ver < 0 || !head.env) {
-      throw permanentCandidateError('bad response');
-    }
-
-    let raw;
-    try { raw = await C.unseal(keys.key, head.env); }
-    catch (err) { throw permanentCandidateError('cannot decrypt'); }
-    if (attempt !== joinAttempt || sync) return;
-    if (!candidateBoardShape(raw)) throw permanentCandidateError('bad board');
-    let remote;
-    try { remote = C.migrate(raw); }
-    catch (err) { throw permanentCandidateError('bad board'); }
-
-    pendingCandidate = { secret, keys, ver: head.ver, remote };
-    if (state.seed === true) commitCandidate('replace');
-    else { syncView = 'choose'; renderSync(); focusSyncState(); }
-  } catch (err) {
-    if (attempt !== joinAttempt || sync) return;
-    pendingCandidate = null;
-    syncFailMsg = err && (err.retryable || !err.permanent) ? 'offline' : 'gone';
-    syncView = 'failed';
-    setSyncStatus('off');
-    renderSync();
-    focusSyncState();
-  }
-}
-
-function commitCandidate(mode) {
-  const candidate = pendingCandidate;
-  if (!candidate || sync) return;
-  joinAttempt++;
-  pendingCandidate = null;
-  pendingSecret = null;
-  suspendSyncRuntime();
-
-  const oldContent = contentGenOf(state);
-  const oldBinding = bindingGenOf(state);
-  let next = mode === 'combine'
-    ? C.merge(state, candidate.remote, { preferOrder: 'remote' })
-    : linkedReplacement(candidate.remote);
-  next._contentGen = clone(mode === 'replace' ? nextGen(oldContent) : oldContent);
-  next._bindingGen = nextGen(oldBinding);
-  delete next.seed;
-  if (!installLocalState(next)) {
-    syncView = 'failed';
-    syncFailMsg = 'offline';
-    renderSync();
-    focusSyncState();
-    return;
-  }
-
-  sync = {
-    secret: candidate.secret,
-    ver: candidate.ver,
-    _bindingGen: clone(bindingGenOf(state)),
-  };
-  syncKeys = { secret: candidate.secret, ...candidate.keys };
-  remoteHead = normalized(candidate.remote);
-  rejectedPayload = '';
-  floor = { events: candidate.remote.events || [], tombstones: candidate.remote.tombstones || {} };
-  joiningOrder = mode === 'combine';
-  saveSyncConfig(); // board was written first and carries the matching binding
-  syncNoticeKey = mode === 'combine' ? 'combinedLinked' : 'connectedLinked';
-  setSyncStatus('ok');
-  syncedAt = Date.now();
-  syncView = 'on';
-  render();
-  renderSync();
-  focusSyncState();
-  connectWatch();
-  if (mode === 'combine' && syncableStr(state) !== remoteHead) schedulePush(0);
-}
 
 const byId = id => state.tasks.find(t => t.id === id);
 const projectOf = t => state.projects.find(p => p.id === t.projectId) || null;
@@ -1209,61 +305,6 @@ const panel = $('#projects');
 const menu = $('#menu');
 const qInput = $('#q');
 
-/* ── PWA updates ───────────────────────────────────────── */
-
-const updateNotice = $('#updateNotice');
-const updateBtn = $('#updateBtn');
-let pendingWorker = null;
-let reloadingForUpdate = false;
-
-function offerUpdate(worker) {
-  pendingWorker = worker;
-  updateNotice.hidden = false;
-}
-
-function installPwa() {
-  // `file:` keeps working as the downloadable, no-server version. PWA features
-  // activate only from a secure hosted URL (or localhost while developing).
-  if (!('serviceWorker' in navigator) || !window.isSecureContext) return;
-
-  navigator.serviceWorker.addEventListener('controllerchange', () => {
-    if (reloadingForUpdate) location.reload();
-  });
-
-  navigator.serviceWorker.register('./sw.js').then(registration => {
-    if (registration.waiting && navigator.serviceWorker.controller) {
-      offerUpdate(registration.waiting);
-    }
-
-    registration.addEventListener('updatefound', () => {
-      const worker = registration.installing;
-      if (!worker) return;
-      worker.addEventListener('statechange', () => {
-        if (worker.state === 'installed' && navigator.serviceWorker.controller) {
-          offerUpdate(worker);
-        }
-      });
-    });
-
-    // Browsers throttle automatic checks; opening the board online should still
-    // discover a newly deployed version promptly.
-    registration.update().catch(() => {});
-  }).catch(err => console.warn('board: service worker registration failed —', err));
-}
-
-updateBtn.onclick = () => {
-  if (!pendingWorker) return;
-  reloadingForUpdate = true;
-  pendingWorker.postMessage('skip-waiting');
-  // controllerchange is the normal, atomic route. A few browser/PWA shells
-  // fail to surface it reliably; after activation has had time to finish, a
-  // reload is still safer than leaving someone on a stale release.
-  setTimeout(() => {
-    if (reloadingForUpdate) location.reload();
-  }, 1800);
-};
-
-if (!KUIPER) installPwa();
 
 $('#newTask').innerHTML = ICON.plus;
 $('#menuBtn').innerHTML = ICON.more;
@@ -1301,7 +342,7 @@ function flip(mutate) {
   const boardScroll = swimlaneBoard ? { left: board.scrollLeft, top: board.scrollTop } : null;
   $$('.col-body', board).forEach(b => {
     const col = b.closest('.col');
-    const key = KUIPER && typeof KuiperUI !== 'undefined' && KuiperUI.isSwimlaneMode?.()
+    const key = typeof KuiperUI !== 'undefined' && KuiperUI.isSwimlaneMode?.()
       ? KuiperUI.colScrollKey(col)
       : col?.dataset.id;
     if (key) scrolled.set(key, b.scrollTop);
@@ -1315,7 +356,7 @@ function flip(mutate) {
   }
   $$('.col-body', board).forEach(b => {
     const col = b.closest('.col');
-    const key = KUIPER && typeof KuiperUI !== 'undefined' && KuiperUI.isSwimlaneMode?.()
+    const key = typeof KuiperUI !== 'undefined' && KuiperUI.isSwimlaneMode?.()
       ? KuiperUI.colScrollKey(col)
       : col?.dataset.id;
     const top = key ? scrolled.get(key) : 0;
@@ -1355,9 +396,9 @@ const onBoard = t => !t.archivedAt;
 const archivedTasks = () => state.tasks.filter(t => t.archivedAt);
 
 function visible(t) {
-  if (KUIPER && typeof BoardCore !== 'undefined' && !BoardCore.isBoardTopLevelTask(t)) return false;
+  if (typeof BoardCore !== 'undefined' && !BoardCore.isBoardTopLevelTask(t)) return false;
   if (state.filter && t.projectId !== state.filter) return false;
-  if (KUIPER && typeof KuiperUI !== 'undefined' && !KuiperUI.matchesVisible(t)) return false;
+  if (typeof KuiperUI !== 'undefined' && !KuiperUI.matchesVisible(t)) return false;
   if (state.flagFilter && !t.flag) return false;
   if (!query) return true;
   const p = projectOf(t);
@@ -1368,17 +409,15 @@ function visible(t) {
 
 const tasksIn = colId => {
   let list = state.tasks.filter(t => t.columnId === colId && onBoard(t) && visible(t));
-  if (KUIPER && typeof KuiperUI !== 'undefined') list = KuiperUI.sortTasks(list);
+  if (typeof KuiperUI !== 'undefined') list = KuiperUI.sortTasks(list);
   else list.sort((a, b) => a.order - b.order);
   return list;
 };
 
 function render(opts = {}) {
-  if (KUIPER) mergeKuiperDevicePrefs();
-  else {
-    document.documentElement.dataset.theme = state.theme;
-    document.documentElement.dataset.density = state.density;
-  }
+  mergeKuiperDevicePrefs();
+  document.documentElement.dataset.theme = state.theme;
+  document.documentElement.dataset.density = state.density;
   renderFilters(opts);
   flip(renderBoard);
 }
@@ -1390,7 +429,7 @@ function renderBoardOnly() {
 const boardIsEmpty = () => !state.tasks.some(onBoard);
 
 function renderFilters(opts = {}) {
-  if (KUIPER && typeof KuiperUI !== 'undefined') {
+  if (typeof KuiperUI !== 'undefined') {
     if (!opts.keepFiltersOpen) {
       filtersEl.innerHTML = '';
       const flagged = state.tasks.filter(t => t.flag && onBoard(t)).length;
@@ -1453,7 +492,7 @@ function renderFilters(opts = {}) {
     b.innerHTML = `<span class="dot"></span>${esc(p.name)}${n ? ` <span style="color:var(--faint);font:400 10.5px var(--mono)">${n}</span>` : ''}`;
     b.onclick = () => {
       state.filter = state.filter === p.id ? null : p.id; state.flagFilter = false;
-      if (KUIPER && typeof KuiperUI !== 'undefined') KuiperUI.saveUiPrefs();
+      if (typeof KuiperUI !== 'undefined') KuiperUI.saveUiPrefs();
       save(); render();
     };
     filtersEl.append(b);
@@ -1466,7 +505,7 @@ function renderFilters(opts = {}) {
   add.onclick = openProjects;
   filtersEl.append(add);
 
-  if (KUIPER && typeof KuiperUI !== 'undefined') KuiperUI.mountRailControls(filtersEl);
+  if (typeof KuiperUI !== 'undefined') KuiperUI.mountRailControls(filtersEl);
 }
 
 function appendGhostCol(parent) {
@@ -1485,15 +524,14 @@ function appendColumn(parent, col, items, { lane = null, showPhantom = false } =
   el.dataset.id = col.id;
   if (lane) el.dataset.lane = lane;
 
-  const colLabel = KUIPER && typeof KuiperUI !== 'undefined' ? KuiperUI.stageLabel(col.name) : col.name;
+  const colLabel = typeof KuiperUI !== 'undefined' ? KuiperUI.stageLabel(col.name) : col.name;
   el.innerHTML = `
     <div class="col-head">
-      <span class="col-name"${KUIPER ? '' : ' contenteditable="plaintext-only"'} spellcheck="false">${esc(colLabel)}</span>
+      <span class="col-name" spellcheck="false">${esc(colLabel)}</span>
       <span class="col-count">${items.length}</span>
       <span class="grow"></span>
       <button class="grab" title="${tr('reorder')}">${ICON.grip}</button>
       <button class="icon sm" data-add title="${tr('newTask')}">${ICON.plus}</button>
-      ${!KUIPER && total === 0 && state.columns.length > 1 ? `<button class="icon sm" data-del title="${tr('delete')} ${tr('stage')}">${ICON.close}</button>` : ''}
     </div>
     <div class="col-body"></div>`;
 
@@ -1504,7 +542,7 @@ function appendColumn(parent, col, items, { lane = null, showPhantom = false } =
 
   const body = $('.col-body', el);
   if (composerCol === col.id && !lane) body.append(composerEl(col.id));
-  if (KUIPER && typeof KuiperUI !== 'undefined' && !KuiperUI.isSwimlaneMode?.()) {
+  if (typeof KuiperUI !== 'undefined' && !KuiperUI.isSwimlaneMode?.()) {
     KuiperUI.appendGrouped(body, items, cardEl);
   } else {
     items.forEach(t => body.append(cardEl(t)));
@@ -1521,7 +559,7 @@ function appendColumn(parent, col, items, { lane = null, showPhantom = false } =
 
   $('[data-add]', el).onclick = e => {
     e.stopPropagation();
-    if (KUIPER && typeof KuiperUI !== 'undefined') {
+    if (typeof KuiperUI !== 'undefined') {
       openEditor(null, col.id, { lane });
     } else {
       openComposer(col.id);
@@ -1529,21 +567,6 @@ function appendColumn(parent, col, items, { lane = null, showPhantom = false } =
   };
   const del = $('[data-del]', el);
   if (del) del.onclick = () => deleteColumn(col.id);
-
-  const name = $('.col-name', el);
-  if (!KUIPER) {
-    name.addEventListener('blur', () => {
-      const v = name.textContent.trim();
-      col.name = v || col.name;
-      name.textContent = col.name;
-      save();
-      flushExternal();
-    });
-    name.addEventListener('keydown', e => {
-      if (e.key === 'Enter') { e.preventDefault(); name.blur(); }
-      if (e.key === 'Escape') { name.textContent = col.name; name.blur(); }
-    });
-  }
 
   parent.append(el);
   return el;
@@ -1555,7 +578,7 @@ function renderViewModuleMissing() {
 }
 
 function renderBoard() {
-  if (KUIPER && typeof KuiperUI !== 'undefined') {
+  if (typeof KuiperUI !== 'undefined') {
     const view = KuiperUI.getBoardView?.() || 'board';
     if (view === 'list') {
       if (typeof KuiperGantt !== 'undefined') KuiperGantt.destroy();
@@ -1599,7 +622,7 @@ function renderBoard() {
     if (typeof KuiperGantt !== 'undefined') KuiperGantt.destroy();
   }
   board.innerHTML = '';
-  const swimlanes = KUIPER && typeof KuiperUI !== 'undefined' && KuiperUI.isSwimlaneMode?.();
+  const swimlanes = typeof KuiperUI !== 'undefined' && KuiperUI.isSwimlaneMode?.();
   // Quitar clases de otras vistas (gantt/calendar ponen overflow:hidden en .board).
   board.className = 'board';
   board.classList.toggle('kuiper-swimlanes', !!swimlanes);
@@ -1648,13 +671,13 @@ function cardEl(t) {
   el.dataset.id = t.id;
   el.tabIndex = 0;
   if (p) el.style.setProperty('--c', p.color);
-  if (KUIPER && typeof KuiperUI !== 'undefined') {
+  if (typeof KuiperUI !== 'undefined') {
     el.classList.add('kuiper-card');
     if ((t.priority || 0) > 0) el.classList.add('has-pri');
   }
 
   const since = age(t.updatedAt);
-  const kuiper = KUIPER && typeof KuiperUI !== 'undefined';
+  const kuiper = typeof KuiperUI !== 'undefined';
 
   let metaBlock = '';
   if (kuiper) {
@@ -1745,7 +768,7 @@ function age(ts) {
 /* ── tasks ─────────────────────────────────────────────── */
 
 function addTask(patch) {
-  if (KUIPER && typeof KuiperStore !== 'undefined' && typeof KuiperUI !== 'undefined' && patch.title) {
+  if (typeof KuiperStore !== 'undefined' && typeof KuiperUI !== 'undefined' && patch.title) {
     try {
       const body = KuiperUI.buildCreateBody({
         ...patch,
@@ -1763,7 +786,7 @@ function addTask(patch) {
   const now = Date.now();
   const t = {
     id: uid(), title: '', notes: '',
-    projectId: (KUIPER && state.projectFilters?.[0]) || state.filter || null,
+    projectId: state.projectFilters?.[0] || state.filter || null,
     epicId: null, sprintId: null, issueType: 'task', parentId: null, priority: 0,
     session: '', flag: state.flagFilter || false, columnId: state.columns[0].id,
     order: 0, createdAt: now, updatedAt: now, ...patch,
@@ -2050,7 +1073,7 @@ function dropTargetAt(x, y) {
 function syncTaskFromDrop(task, colEl) {
   if (!task || !colEl) return;
   const lane = colEl.dataset.lane;
-  if (!lane || !KUIPER || typeof KuiperUI === 'undefined' || !KuiperUI.isSwimlaneMode?.()) return;
+  if (!lane || typeof KuiperUI === 'undefined' || !KuiperUI.isSwimlaneMode?.()) return;
   const mode = state.groupBy;
   if (mode === 'project') task.projectId = lane === '__none__' ? null : lane;
   else if (mode === 'epic') task.epicId = lane === '__none__' ? null : lane;
@@ -2175,7 +1198,7 @@ function endDrag() {
 }
 
 function commitOrder(movedId) {
-  const swimlanes = KUIPER && typeof KuiperUI !== 'undefined' && KuiperUI.isSwimlaneMode?.();
+  const swimlanes = typeof KuiperUI !== 'undefined' && KuiperUI.isSwimlaneMode?.();
   if (swimlanes) {
     state.columns.forEach(col => {
       const ids = [];
@@ -2331,7 +1354,7 @@ function dragColumn(ev, srcCol) {
     state.columns.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
     const changed = state.columns.map(x => x.id).join() !== was;
     if (changed) {
-      if (KUIPER && typeof KuiperStore !== 'undefined') {
+      if (typeof KuiperStore !== 'undefined') {
         const slug = kuiperBoardSlugFromUrl();
         const orderIds = state.columns.map(c => c.id);
         KuiperStore.reorderStages(slug, orderIds)
@@ -2414,7 +1437,7 @@ function openEditor(id, colId, { lane = null, issueTab = null } = {}) {
     flag: state.flagFilter || false, columnId: colId || state.columns[0].id,
   };
   if (!t && colId) draft.columnId = colId;
-  if (!t && lane && KUIPER && typeof KuiperUI !== 'undefined') {
+  if (!t && lane && typeof KuiperUI !== 'undefined') {
     Object.assign(draft, KuiperUI.defaultsForLane(lane));
   }
 
@@ -2422,8 +1445,8 @@ function openEditor(id, colId, { lane = null, issueTab = null } = {}) {
   fNotes.value = draft.notes || '';
   fSession.value = draft.session || '';
   $('#f-archive').style.visibility = t ? 'visible' : 'hidden';
-  $('#f-close').title = (KUIPER && t) ? tr('close') : tr('discard');
-  if (KUIPER && typeof KuiperUI !== 'undefined') {
+  $('#f-close').title = t ? tr('close') : tr('discard');
+  if (typeof KuiperUI !== 'undefined') {
     KuiperUI.onEditorOpen(draft, editing, issueTab ? { issueTab } : {});
   } else {
     renderStage();
@@ -2441,7 +1464,7 @@ function renderStage() {
   fStage.innerHTML = '';
   state.columns.forEach(c => {
     const b = document.createElement('button');
-    b.textContent = KUIPER && typeof KuiperUI !== 'undefined' ? KuiperUI.stageLabel(c.name) : c.name;
+    b.textContent = typeof KuiperUI !== 'undefined' ? KuiperUI.stageLabel(c.name) : c.name;
     b.setAttribute('aria-pressed', String(draft.columnId === c.id));
     b.onclick = () => { draft.columnId = c.id; renderStage(); };
     fStage.append(b);
@@ -2466,21 +1489,13 @@ function renderProjectChooser() {
     b.onclick = () => {
       draft.projectId = p.id;
       renderProjectChooser();
-      if (KUIPER && typeof KuiperUI !== 'undefined') {
+      if (typeof KuiperUI !== 'undefined') {
         KuiperUI.renderEditorFields(draft, { epicEl: fEpic, priorityEl: fPriority });
       }
     };
     fProject.append(b);
   });
 
-  if (!KUIPER) {
-    const add = document.createElement('button');
-    add.className = 'pill add';
-    add.title = 'Projects';
-    add.innerHTML = ICON.plus;
-    add.onclick = () => { closeEditor(); openProjects(); };
-    fProject.append(add);
-  }
 }
 
 function syncFlagBtn() {
@@ -2493,12 +1508,12 @@ let kuiperEditorSaveTimer = null;
 
 function pullEditorIntoDraft() {
   if (!draft) return false;
-  if (KUIPER && typeof KuiperUI !== 'undefined') KuiperUI.flushEditor();
+  if (typeof KuiperUI !== 'undefined') KuiperUI.flushEditor();
   draft.title = fTitle.value.trim();
   draft.notes = fNotes.value.trim();
   draft.session = fSession.value.trim();
-  if (KUIPER && typeof KuiperUI !== 'undefined') KuiperUI.captureEditorDraft(draft);
-  if (KUIPER && typeof KuiperIssuePanel !== 'undefined') {
+  if (typeof KuiperUI !== 'undefined') KuiperUI.captureEditorDraft(draft);
+  if (typeof KuiperIssuePanel !== 'undefined') {
     KuiperIssuePanel.syncDraft(draft);
     if (!KuiperIssuePanel.validateScheduleDraft(draft)) return false;
   }
@@ -2509,7 +1524,7 @@ function persistEditorDraft({ rerender = true } = {}) {
   if (editor.hidden || !editing || editing === 'new' || !draft) return false;
   if (!pullEditorIntoDraft()) return false;
   if (!draft.title) return false;
-  if (KUIPER && typeof BoardCore !== 'undefined' && BoardCore.isSubtask(draft) && !draft.parentId) {
+  if (typeof BoardCore !== 'undefined' && BoardCore.isSubtask(draft) && !draft.parentId) {
     toast(tr('parentIssue'), null, undefined, 'warning');
     return false;
   }
@@ -2524,10 +1539,10 @@ function persistEditorDraft({ rerender = true } = {}) {
     resequence(t.columnId);
     logEvent(t, 'moved', from, t.columnId);
   }
-  if (KUIPER) queueKuiperCardPatch(prev, t);
+  queueKuiperCardPatch(prev, t);
   save();
-  if (KUIPER) flushPendingSave();
-  if (KUIPER && !editor.hidden) {
+  flushPendingSave();
+  if (!editor.hidden) {
     if (moved) renderBoardOnly();
     else if (typeof KuiperUI !== 'undefined') KuiperUI.refreshBoardCard(t);
   } else if (rerender) render();
@@ -2535,7 +1550,7 @@ function persistEditorDraft({ rerender = true } = {}) {
 }
 
 function scheduleKuiperEditorPersist() {
-  if (!KUIPER || editor.hidden || editing === 'new') return;
+  if (editor.hidden || editing === 'new') return;
   clearTimeout(kuiperEditorSaveTimer);
   kuiperEditorSaveTimer = setTimeout(() => {
     kuiperEditorSaveTimer = null;
@@ -2555,7 +1570,7 @@ function saveEditor() {
 
   if (!draft.title) { closeEditor(); return; }
 
-  if (KUIPER && typeof BoardCore !== 'undefined' && BoardCore.isSubtask(draft) && !draft.parentId) {
+  if (typeof BoardCore !== 'undefined' && BoardCore.isSubtask(draft) && !draft.parentId) {
     toast(tr('parentIssue'), null, undefined, 'warning');
     return;
   }
@@ -2571,11 +1586,11 @@ function saveEditor() {
 }
 
 function closeEditor() {
-  if (KUIPER && !editor.hidden && editing && editing !== 'new') {
+  if (!editor.hidden && editing && editing !== 'new') {
     flushKuiperEditorPersist();
     persistEditorDraft({ rerender: false });
   }
-  if (KUIPER && typeof KuiperUI !== 'undefined') KuiperUI.onEditorClose();
+  if (typeof KuiperUI !== 'undefined') KuiperUI.onEditorClose();
   editor.hidden = true;
   editing = null;
   draft = null;
@@ -2591,7 +1606,7 @@ fFlag.onclick = () => {
   draft.flag = !draft.flag;
   syncFlagBtn();
   popStar($('svg', fFlag), draft.flag);
-  if (KUIPER && editing && editing !== 'new') persistEditorDraft({ rerender: false });
+  if (editing && editing !== 'new') persistEditorDraft({ rerender: false });
 };
 $('#f-session-copy').onclick = async () => {
   if (!fSession.value.trim()) return;
@@ -2618,7 +1633,7 @@ fTitle.addEventListener('input', () => {
 fNotes.addEventListener('input', () => scheduleKuiperEditorPersist());
 fSession.addEventListener('input', () => scheduleKuiperEditorPersist());
 [fTitle, fNotes, fSession].forEach(el => el.addEventListener('keydown', e => {
-  if (KUIPER && editing !== 'new') {
+  if (editing !== 'new') {
     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
       flushKuiperEditorPersist();
@@ -2849,15 +1864,6 @@ function dragProjectRow(ev, srcRow) {
 
 $('#proj-add').addEventListener('submit', e => {
   e.preventDefault();
-  if (KUIPER) return;
-  const input = $('#proj-name');
-  const name = input.value.trim();
-  if (!name) return;
-  state.projects.push({ id: uid(), name, color: COLORS[state.projects.length % COLORS.length] });
-  input.value = '';
-  save();
-  render();
-  renderProjects();
 });
 
 $('[data-close]', panel).onclick = closeProjects;
@@ -2963,358 +1969,6 @@ archEmptyBtn.onclick = () => {
 
 $('[data-close]', archiveEl).onclick = closeArchive;
 
-/* ── sync sheet ────────────────────────────────────────────
-   One shell owns both sides of pairing: Start shares this board; Join accepts
-   the same link on a desktop. Candidate inspection is a state, not a mutation,
-   and a real local board chooses Replace or Combine explicitly. */
-
-const syncEl = $('#sync');
-let syncView = 'off';       // off | join | checking | blocked | choose | failed | on | end
-let syncFailMsg = null;     // which failure the failed view explains
-let syncingSince = 0;       // when the in-flight push started
-let syncNoticeKey = null;   // transient inline result for the connected view
-let syncReturnFocus = null;
-
-$('[data-close]', syncEl).innerHTML = ICON.close;
-$('#sync-copy').innerHTML = ICON.copy;
-
-/** Santiago, like every other date in the app: a second device-local clock
-    could disagree with the day boundary printed beside it. */
-const SYNC_CLOCK = new Intl.DateTimeFormat('en-GB',
-  { timeZone: C.TZ, hour: '2-digit', minute: '2-digit', hour12: false });
-
-function syncWhen(ms) {
-  const day = C.ymd(ms), today = C.ymd();
-  if (day === today) return SYNC_CLOCK.format(new Date(ms));
-  if (day === C.addDays(today, -1)) return tr('yesterday');
-  return day;
-}
-
-/** The footer reports OUTBOUND only. An inbound change explains itself by
-    moving the board (see flip()), and a status line flickering every time
-    the phone saves would undo that explanation. */
-function syncStatusLine() {
-  if (syncView === 'checking') return tr('checkingLink');
-  if (syncView === 'failed') return syncFailMsg === 'gone' ? tr('linkNotFound') : tr('syncNoAnswer');
-  if (!sync) return '';
-  switch (syncStatus) {
-    // below ~400ms the round trip is invisible and the timestamp is the news
-    case 'syncing': return Date.now() - syncingSince > 400 ? tr('syncing') : lastStatusText;
-    case 'offline': return tr('syncOffline');
-    case 'gone': return tr('syncGone');
-    case 'error': return tr('syncTooBig');
-    default: {
-      const when = syncedAt ? syncWhen(syncedAt) : '';
-      if (!when) return '';
-      // `live` means the socket is genuinely open, never optimism: a change
-      // on the other device will arrive here without anyone asking.
-      const live = watchSock && watchSock.readyState === 1;
-      return tr(live ? 'syncLive' : 'syncedAt', { when });
-    }
-  }
-}
-
-let lastStatusText = '';
-
-function renderSyncStatus() {
-  if (syncEl.hidden) return;
-  const el = $('#sync-status');
-  const next = syncStatusLine();
-  lastStatusText = next;
-  // role="status" re-announces on every assignment, so only write on change
-  if (el.textContent !== next) el.textContent = next;
-}
-
-/* The QR encoder is a quarter of the app's JavaScript for a feature most
-   boards never turn on, so it arrives when the sheet first needs to draw
-   one — a plain classic script from the same directory, so `file:` keeps
-   working. If it cannot load, the link column stands alone: the QR is never
-   load-bearing. */
-let qrLoad = null;
-function ensureQr() {
-  if (window.qrcodegen) return Promise.resolve(true);
-  if (!qrLoad) {
-    qrLoad = new Promise(resolve => {
-      const s = document.createElement('script');
-      s.src = 'qr.js';
-      s.onload = () => resolve(!!window.qrcodegen);
-      s.onerror = () => resolve(false);
-      document.head.append(s);
-    });
-  }
-  return qrLoad;
-}
-
-/** One inline SVG, one path. Graphite on white in both themes. */
-function qrSvg(text) {
-  const qr = qrcodegen.QrCode.encodeText(text, qrcodegen.QrCode.Ecc.MEDIUM);
-  let d = '';
-  for (let y = 0; y < qr.size; y++) {
-    for (let x = 0; x < qr.size; x++) if (qr.getModule(x, y)) d += `M${x} ${y}h1v1h-1z`;
-  }
-  return `<svg viewBox="0 0 ${qr.size} ${qr.size}" role="img" aria-label="${tr('pairingLink')}"`
-    + ` shape-rendering="crispEdges"><path d="${d}"/></svg>`;
-}
-
-function boardSignature(st, label) {
-  const cards = (st.tasks || []).length;
-  const stages = (st.columns || []).length;
-  return `${label} · ${cards} ${tr(cards === 1 ? 'card' : 'cards')}`
-    + ` · ${stages} ${tr(stages === 1 ? 'stage' : 'stages')}`;
-}
-
-function setSyncOutsideInert(on) {
-  for (const el of document.body.children) {
-    if (el === syncEl || el === scrim || el.tagName === 'SCRIPT') continue;
-    el.inert = on;
-  }
-}
-
-function focusSyncState() {
-  requestAnimationFrame(() => {
-    if (syncEl.hidden) return;
-    if (syncView === 'join') { $('#sync-join-input').focus(); return; }
-    if (syncView === 'off') { $('#sync-enable').focus(); return; }
-    if (syncView === 'on') { $('#sync-url').focus(); $('#sync-url').select(); return; }
-    $('#sync-state-title').focus();
-  });
-}
-
-syncEl.addEventListener('keydown', e => {
-  if (e.key !== 'Tab') return;
-  const focusable = $$('button:not([hidden]):not([disabled]), input:not([hidden]):not([disabled]), [tabindex]:not([tabindex="-1"])', syncEl)
-    .filter(el => !el.closest('[hidden]'));
-  if (!focusable.length) return;
-  const first = focusable[0], last = focusable[focusable.length - 1];
-  if (e.shiftKey && (document.activeElement === first || document.activeElement === $('#sync-state-title'))) { e.preventDefault(); last.focus(); }
-  else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
-});
-
-function renderSync() {
-  if (syncEl.hidden) return;
-  const view = syncView;
-  const title = $('#sync-state-title');
-  const say = $('#sync-say');
-  const titleKey = view === 'off' || view === 'join' ? 'syncOffTitle'
-    : view === 'checking' ? 'checkingLink'
-    : view === 'blocked' ? 'alreadyOtherTitle'
-    : view === 'choose' ? 'chooseJoinTitle'
-    : view === 'failed' ? (syncFailMsg === 'gone' ? 'deadLinkTitle' : 'offlineLinkTitle')
-    : view === 'end' ? 'endSyncTitle' : 'addDevice';
-  const sayKey = view === 'off' || view === 'join' ? 'syncPitch'
-    : view === 'blocked' ? 'alreadyOtherBody'
-    : view === 'choose' ? 'chooseJoinBody'
-    : view === 'failed' ? (syncFailMsg === 'gone' ? 'deadLinkBody' : 'offlineLinkBody')
-    : view === 'end' ? 'endSyncBody'
-    : view === 'on' && syncNoticeKey ? syncNoticeKey : null;
-  title.textContent = tr(titleKey);
-  say.hidden = !sayKey;
-  say.textContent = sayKey ? tr(sayKey) : '';
-
-  $('#sync-join').hidden = view !== 'join';
-  $('#sync-choice').hidden = view !== 'choose';
-  $('#sync-pair').hidden = view !== 'on';
-  $('#sync-actions').hidden = view !== 'on';
-
-  $('#sync-join-label').textContent = tr('pasteSyncLink');
-  $('#sync-join-go').textContent = tr('continue');
-  $('#sync-enable').hidden = view !== 'off';
-  $('#sync-enable').textContent = tr('enableSync');
-  $('#sync-join-open').hidden = view !== 'off';
-  $('#sync-join-open').textContent = tr('joinSyncLink');
-  $('#sync-view').hidden = view !== 'blocked';
-  $('#sync-view').textContent = tr('viewCurrentSync');
-  $('#sync-cancel').hidden = !['join', 'checking', 'choose', 'failed', 'end'].includes(view);
-  $('#sync-cancel').textContent = tr('cancel');
-  $('#sync-retry').hidden = !(view === 'failed' && syncFailMsg === 'offline');
-  $('#sync-retry').textContent = tr('tryAgain');
-  $('#sync-end-confirm').hidden = view !== 'end';
-  $('#sync-end-confirm').textContent = tr('endSync');
-
-  if (view === 'choose' && pendingCandidate) {
-    $('#sync-replace-label').textContent = tr('replaceLinked');
-    $('#sync-replace-desc').textContent = tr('replaceLinkedDesc');
-    $('#sync-combine-label').textContent = tr('combineBoards');
-    $('#sync-combine-desc').textContent = tr('combineBoardsDesc');
-    $('#sync-linked-signature').textContent = boardSignature(pendingCandidate.remote, tr('linkedBoard'));
-    $('#sync-local-signature').textContent = boardSignature(state, tr('thisDevice'));
-    $('#sync-export').textContent = tr('exportCurrent');
-  }
-
-  if (view === 'on') {
-    const link = syncLink();
-    $('#sync-scan').textContent = tr('syncScanLine');
-    $('#sync-url').value = link;
-    $('#sync-warn').textContent = tr('syncWarning');
-    $('#sync-cli-summary').textContent = tr('syncCli');
-    $('#sync-cli-say').textContent = tr('syncCliSay');
-    // The link is never interpolated here: it is a password, and this block is
-    // the one part of the sheet a person is likely to screenshot.
-    $('#sync-cli-cmd').textContent =
-      'npm i -g kanban.page\nkanban board add mine';
-    const plate = $('#sync-qr');
-    ensureQr().then(ok => {
-      // the sheet may have moved on while the script loaded
-      if (syncEl.hidden || syncView !== 'on') return;
-      plate.hidden = !ok;
-      if (ok) plate.innerHTML = qrSvg(syncLink());
-    });
-    $('#sync-stop-label').textContent = tr('disconnectDevice');
-    $('#sync-stop-desc').textContent = tr('disconnectDesc');
-    $('#sync-del-label').textContent = tr('endSyncAll');
-    $('#sync-del-desc').textContent = tr('endSyncAllDesc');
-  }
-
-  renderSyncStatus();
-}
-
-function openSync(view, returnFocus = null) {
-  closeComposer();
-  disarm();
-  if (syncEl.hidden) {
-    const active = document.activeElement;
-    syncReturnFocus = returnFocus
-      || (active && active.closest && active.closest('#menu') ? $('#menuBtn') : active);
-  }
-  syncView = view || (sync ? 'on' : 'off');
-  syncEl.hidden = false;
-  scrim.hidden = false;
-  setSyncOutsideInert(true);
-  renderSync();
-  focusSyncState();
-}
-
-function closeSync() {
-  joinAttempt++;
-  pendingCandidate = null;
-  pendingSecret = null;
-  syncEl.hidden = true;
-  disarm();
-  syncNoticeKey = null;
-  syncView = sync ? 'on' : 'off';
-  setSyncOutsideInert(false);
-  syncScrim();
-  const back = syncReturnFocus;
-  syncReturnFocus = null;
-  if (back && back.isConnected && typeof back.focus === 'function') back.focus();
-}
-
-$('[data-close]', syncEl).onclick = closeSync;
-
-$('#sync-enable').onclick = async () => {
-  const b = $('#sync-enable');
-  b.disabled = true;
-  syncingSince = Date.now();
-  setSyncStatus('syncing');
-  const ok = await enableSync();
-  b.disabled = false;
-  if (!ok) { toast(tr('syncFailed'), null, undefined, 'error'); syncStopped(); renderSync(); return; }
-  syncView = 'on';
-  renderSync();
-  focusSyncState();
-};
-
-$('#sync-retry').onclick = () => {
-  if (!pendingSecret) { closeSync(); return; }
-  inspectCandidate(pendingSecret);
-};
-
-$('#sync-join-open').onclick = () => { syncView = 'join'; renderSync(); focusSyncState(); };
-
-function parseSyncEntry(value) {
-  const text = value.trim();
-  if (/^[A-Za-z0-9_-]{43}$/.test(text)) return { secret: text, search: location.search };
-  let url;
-  try { url = new URL(text); } catch (err) { return null; }
-  const match = url.hash.match(/[#&]sync=([A-Za-z0-9_-]{43})(?:&|$)/);
-  return match ? { secret: match[1], search: url.search } : null;
-}
-
-$('#sync-join').onsubmit = e => {
-  e.preventDefault();
-  const input = $('#sync-join-input');
-  const parsed = parseSyncEntry(input.value);
-  input.value = '';
-  if (!parsed) {
-    syncFailMsg = 'gone';
-    syncView = 'failed';
-    renderSync();
-    focusSyncState();
-    return;
-  }
-  if (parsed.search !== location.search) {
-    location.assign(`${location.pathname}${parsed.search}#sync=${parsed.secret}`);
-    return;
-  }
-  inspectCandidate(parsed.secret);
-};
-
-$('#sync-replace').onclick = () => commitCandidate('replace');
-$('#sync-combine').onclick = () => commitCandidate('combine');
-$('#sync-export').onclick = exportBackup;
-$('#sync-view').onclick = () => { syncNoticeKey = null; syncView = 'on'; renderSync(); focusSyncState(); };
-$('#sync-cancel').onclick = () => {
-  if (syncView === 'end') { syncView = 'on'; renderSync(); focusSyncState(); return; }
-  if (syncView === 'join') { syncView = 'off'; renderSync(); focusSyncState(); return; }
-  closeSync();
-};
-
-/* Copy confirms in place, the way the editor's session line does — no toast.
-   Every copy in this app with a surface to show a state uses it. */
-$('#sync-copy').onclick = async () => {
-  if (!sync) return;
-  const ok = await copyText(syncLink());
-  if (!ok) { toast(tr('couldNotCopy'), null, undefined, 'error'); return; }
-  const wrap = $('#sync-url-wrap');
-  const btn = $('#sync-copy');
-  wrap.classList.add('copied');
-  btn.innerHTML = ICON.check;
-  setTimeout(() => { wrap.classList.remove('copied'); btn.innerHTML = ICON.copy; }, 1200);
-};
-
-/* Stopping forgets this device's key: the board stays whole and local, and
-   other devices keep syncing. No card is lost, so an armed confirm would be
-   ceremony — but the secret may exist nowhere else, so it takes the app's
-   other safety idiom instead. undo() cannot serve: it restores board state,
-   and the secret lives outside state by design. */
-$('#sync-stop').onclick = () => {
-  const was = sync && clone(sync);
-  syncStopped();
-  closeSync();
-  toast(tr('syncStopped'), () => {
-    if (!was || sync) return;
-    suspendSyncRuntime();
-    state._bindingGen = nextGen(bindingGenOf(state), bindingGenOf(was));
-    lastStamped = clone(state);
-    if (!writeStateNow()) return;
-    sync = { ...was, _bindingGen: clone(bindingGenOf(state)) };
-    syncKeys = null;
-    remoteHead = '';
-    rejectedPayload = '';
-    floor = null;
-    saveSyncConfig();
-    connectWatch();
-    pull();
-  });
-};
-
-$('#sync-del').onclick = () => { syncView = 'end'; renderSync(); focusSyncState(); };
-
-$('#sync-end-confirm').onclick = async () => {
-  const b = $('#sync-end-confirm');
-  b.disabled = true;
-  const deleted = await deleteFromServer();
-  b.disabled = false;
-  if (!deleted) {
-    syncView = 'on';
-    renderSync();
-    focusSyncState();
-    toast(tr('syncDeleteFailed'), null, 8000, 'error');
-    return;
-  }
-  closeSync();
-  toast(tr('serverDeleted'));
-};
 
 /* ── menu, backup, theme ───────────────────────────────── */
 
@@ -3347,7 +2001,6 @@ menu.addEventListener('click', e => {
   if (act === 'archive-last') archiveLastColumn();
   if (act === 'export') exportBackup();
   if (act === 'import') $('#importFile').click();
-  if (act === 'sync') openSync(null, $('#menuBtn'));
 });
 
 // The menu is the only place that names the last stage, so label it live.
@@ -3358,15 +2011,12 @@ $('#menuBtn').addEventListener('click', () => {
     ? `${tr('archiveVerb')} ${col.name.toLowerCase()}${n ? ` (${n})` : ''}`
     : tr('archiveFinished');
   $('#act-density').setAttribute('aria-pressed', String(state.density === 'compact'));
-  // The one place sync has standing presence: without it, someone who paired
-  // three months ago has no way to learn this board leaves the machine.
-  $('#act-sync').setAttribute('aria-pressed', String(!!sync));
 });
 
 function toggleTheme() {
   state.theme = state.theme === 'dark' ? 'light' : 'dark';
   document.documentElement.dataset.theme = state.theme;
-  if (KUIPER) saveKuiperPrefs({ ...loadKuiperPrefs(), theme: state.theme });
+  saveKuiperPrefs({ ...loadKuiperPrefs(), theme: state.theme });
   save();
 }
 
@@ -3375,7 +2025,7 @@ function toggleDensity() {
   // flip() so every card glides to its new rect instead of the board snapping
   flip(() => { document.documentElement.dataset.density = state.density; });
   $('#act-density').setAttribute('aria-pressed', String(state.density === 'compact'));
-  if (KUIPER) saveKuiperPrefs({ ...loadKuiperPrefs(), density: state.density });
+  saveKuiperPrefs({ ...loadKuiperPrefs(), density: state.density });
   save();
 }
 
@@ -3395,19 +2045,10 @@ $('#importFile').addEventListener('change', async e => {
   try {
     const next = JSON.parse(await file.text());
     if (!Array.isArray(next.columns) || !Array.isArray(next.tasks)) throw new Error('shape');
-    snapshot(!sync);
-    const incoming = C.migrate(next); // also upgrades a v1 backup on the way in
-    // While synced, importing MERGES. A replace would push a snapshot that
-    // shrinks the relay's event log — and the log is the only copy of the
-    // history, so no import may be able to truncate it for every device.
-    if (sync) {
-      state = C.merge(incoming, state);
-      save();
-    } else {
-      incoming._contentGen = nextGen(contentGenOf(state), contentGenOf(incoming));
-      incoming._bindingGen = clone(maxGen(bindingGenOf(state), bindingGenOf(incoming)));
-      installLocalState(incoming);
-    }
+    snapshot();
+    state = C.migrate(next);
+    lastStamped = clone(state);
+    save();
     render();
     toast(`Imported ${state.tasks.length} tasks`, undo);
   } catch (err) {
@@ -3488,27 +2129,16 @@ function deleteForever(ids) {
 /* ── undo + toast ──────────────────────────────────────── */
 
 let undoSnap = null;
-let undoReplacesBoard = false;
 
-function snapshot(replacesBoard = false) {
+function snapshot() {
   undoSnap = clone(state);
-  undoReplacesBoard = replacesBoard;
 }
 
 function undo() {
   if (!undoSnap) return;
-  const replacement = undoReplacesBoard;
-  const next = undoSnap;
+  state = undoSnap;
   undoSnap = null;
-  undoReplacesBoard = false;
-  if (replacement) {
-    next._contentGen = nextGen(contentGenOf(state), contentGenOf(next));
-    next._bindingGen = clone(maxGen(bindingGenOf(state), bindingGenOf(next)));
-    installLocalState(next);
-  } else {
-    state = next;
-    save();
-  }
+  save();
   render();
 }
 
@@ -3520,8 +2150,8 @@ function toast(msg, action, ms, type) {
 
 function syncScrim() {
   const was = scrim.hidden;
-  const kuiperSideOpen = KUIPER && document.documentElement.dataset.kuiperSide === 'open';
-  scrim.hidden = editor.hidden && panel.hidden && reportEl.hidden && archiveEl.hidden && syncEl.hidden;
+  const kuiperSideOpen = document.documentElement.dataset.kuiperSide === 'open';
+  scrim.hidden = editor.hidden && panel.hidden && reportEl.hidden && archiveEl.hidden;
   if (kuiperSideOpen) scrim.hidden = true;
   // A scrim that has just appeared has not been pressed yet. See below.
   if (was && !scrim.hidden) scrimPressed = false;
@@ -3548,15 +2178,15 @@ scrim.onclick = () => {
   // keyboard, so the discard was one stray tap away. saveEditor() already
   // bails to closeEditor() on an empty title, so an accidental open costs
   // nothing. Esc and the ✕ remain the deliberate ways to throw work away.
-  if (KUIPER && typeof KuiperUI !== 'undefined' && document.documentElement.dataset.kuiperSide === 'open') {
+  if (typeof KuiperUI !== 'undefined' && document.documentElement.dataset.kuiperSide === 'open') {
     KuiperUI.setSidebarOpen(false);
     return;
   }
   if (!editor.hidden) {
-    if (KUIPER && editing !== 'new') closeEditor();
+    if (editing !== 'new') closeEditor();
     else saveEditor();
   } else closeEditor();
-  closeProjects(); closeReport(); closeArchive(); closeSync();
+  closeProjects(); closeReport(); closeArchive();
 };
 
 qInput.addEventListener('input', () => {
@@ -3575,7 +2205,7 @@ const RESUME = /\b(?:claude|codex)\b.*\bresume\b/i;
 
 document.addEventListener('paste', e => {
   if (/^(INPUT|TEXTAREA)$/.test(document.activeElement.tagName) || document.activeElement.isContentEditable) return;
-  if (!editor.hidden || !panel.hidden || !reportEl.hidden || !archiveEl.hidden || !syncEl.hidden) return;
+  if (!editor.hidden || !panel.hidden || !reportEl.hidden || !archiveEl.hidden) return;
 
   const text = (e.clipboardData || window.clipboardData).getData('text') || '';
   const line = text.split('\n').map(s => s.trim()).find(s => RESUME.test(s));
@@ -3591,7 +2221,7 @@ document.addEventListener('keydown', e => {
   const typing = /^(INPUT|TEXTAREA)$/.test(e.target.tagName) || e.target.isContentEditable;
 
   if (e.key === 'Escape') {
-    if (KUIPER && typeof KuiperUI !== 'undefined' && KuiperUI.isWorkspaceView?.()) {
+    if (typeof KuiperUI !== 'undefined' && KuiperUI.isWorkspaceView?.()) {
       KuiperUI.exitWorkspace();
       return;
     }
@@ -3601,7 +2231,6 @@ document.addEventListener('keydown', e => {
     if (!reportEl.hidden) { closeReport(); return; }
     if (!panel.hidden) { closeProjects(); return; }
     if (!archiveEl.hidden) { closeArchive(); return; }
-    if (!syncEl.hidden) { closeSync(); return; }
     closeComposer();
     return;
   }
@@ -3620,7 +2249,7 @@ document.addEventListener('keydown', e => {
   // character starts the first card instead of firing a shortcut — unless a
   // panel is open, where the keystroke belongs to whatever is on screen.
   if (boardIsEmpty() && e.key.length === 1
-    && editor.hidden && panel.hidden && reportEl.hidden && archiveEl.hidden && syncEl.hidden) {
+    && editor.hidden && panel.hidden && reportEl.hidden && archiveEl.hidden) {
     e.preventDefault();
     openComposer(state.columns[0].id);
     const ta = $('.composer textarea', board);
@@ -3927,21 +2556,9 @@ window.__board = {
   get repEntries() { return repEntries; },
   get repWeek() { return repWeek; },
   set repWeek(v) { repWeek = v; },
-  get sync() { return sync; },
-  set sync(v) {
-    suspendSyncRuntime();
-    sync = v ? { ...v, _bindingGen: clone(v._bindingGen || bindingGenOf(state)) } : null;
-    syncKeys = null;
-    remoteHead = '';
-    rejectedPayload = '';
-    floor = null;
-  },
-  get syncStatus() { return syncStatus; },
-  get contentGen() { return contentGenOf(state); },
-  get bindingGen() { return bindingGenOf(state); },
 };
 
-if (KUIPER) {
+{
   mergeKuiperDevicePrefs();
   if (typeof KuiperUI !== 'undefined') {
     const kuiperHooks = {
@@ -4020,50 +2637,5 @@ if (KUIPER) {
       render();
     }
   })();
-} else {
-  render();
 }
 
-/* Sync starts last, once there is a board on screen. A `#sync=` link is
-   removed from the address bar immediately, then opens the checking state;
-   an existing relationship still starts its normal watch/pull independently. */
-
-let candidatePresentation = 0;
-function presentCandidateWhenSettled(secret) {
-  const id = ++candidatePresentation;
-  closeComposer();
-  if (!editor.hidden) {
-    if (KUIPER && editing !== 'new') {
-      flushKuiperEditorPersist();
-      persistEditorDraft({ rerender: false });
-    } else saveEditor();
-  }
-  closeProjects(); closeReport(); closeArchive();
-  if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
-  const settle = () => {
-    if (id !== candidatePresentation) return;
-    if (syncBusy()) { setTimeout(settle, 50); return; }
-    inspectCandidate(secret);
-  };
-  settle();
-}
-
-function adoptFromHash() {
-  const m = location.hash.match(/[#&]sync=([A-Za-z0-9_-]{43})(?:&|$)/);
-  if (!m) return false;
-  // The secret must not linger in the URL bar, in history, or in whatever the
-  // phone's share sheet would copy.
-  history.replaceState(null, '', location.pathname + location.search);
-  presentCandidateWhenSettled(m[1]);
-  return true;
-}
-
-// Pasting a pairing link into a tab that already has the board open is a hash
-// change, not a load — no reload, so the boot path below never sees it.
-window.addEventListener('hashchange', adoptFromHash);
-
-if (!KUIPER) adoptFromHash();
-if (!KUIPER && sync) {
-  connectWatch();
-  pull();
-}

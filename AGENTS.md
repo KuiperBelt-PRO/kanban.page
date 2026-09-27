@@ -4,12 +4,11 @@ Punto de entrada para trabajar en este repositorio (Cursor, Claude Code, etc.).
 
 ## Qué es este repo
 
-Dos modos en el mismo código:
+**Solo modo Kuiper:** la UI usa SQLite + API (`kanban serve`, `KANBAN_DB_PATH`). No hay tablero clásico en `localStorage` ni sync E2E en el navegador.
 
-| Modo | Activación | Persistencia |
-| --- | --- | --- |
-| **Clásico (upstream)** | `index.html` sin `?kuiper=1` | `localStorage` + sync E2E opcional (`relay/`) |
-| **Kuiper (fork)** | `?kuiper=1&board=<slug>` o `KANBAN_DB_PATH` | SQLite + API local (`kanban serve`) |
+- URL: `http://127.0.0.1:8765/?board=<slug>&org=<org>` (el servidor redirige si falta `board`).
+- Validación en browser: MCP `kanban_board_url` / `kanban_open_board`.
+- `tests/dom.test.html` (modo upstream) queda **obsoleto** hasta tener tests DOM contra `kanban serve`.
 
 Vanilla HTML/CSS/JS, sin build. Lógica pura en `core.js`; UI en `app.js` + módulos Kuiper.
 
@@ -26,7 +25,7 @@ Modo Kuiper local:
 
 ```bash
 kanban serve                          # http://127.0.0.1:8765
-# UI: ?kuiper=1&board=hub-delivery&org=<org-slug>
+# UI: ?board=hub-delivery&org=<org-slug>
 ```
 
 DOM: abrir `tests/dom.test.html` en Chrome (`?ns=test`). Ver [`README.md`](README.md#develop).

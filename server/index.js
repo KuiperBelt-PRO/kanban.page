@@ -20,8 +20,9 @@ function startServer({ port = DEFAULT_PORT, dbPath } = {}) {
     }
   });
 
+  const board = (process.env.KUIPER_DEFAULT_BOARD || 'hub-delivery').trim();
   server.listen(port, '127.0.0.1', () => {
-    console.log(`kanban serve · http://127.0.0.1:${port}/?kuiper=1&board=hub-delivery`);
+    console.log(`kanban serve · http://127.0.0.1:${port}/?board=${board}`);
   });
   return server;
 }

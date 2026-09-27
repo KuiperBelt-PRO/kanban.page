@@ -347,6 +347,28 @@ function serveStatic(req, res, urlPath) {
   }
 }
 
+/** Con `kanban serve` (KANBAN_DB_PATH) la UI es solo modo Kuiper; evita tablero clásico por error. */
+function kuiperServeUiRedirect(req, res, url) {
+  if ((req.method || 'GET') !== 'GET') return false;
+  const path = url.pathname;
+  if (path !== '/' && path !== '/index.html') return false;
+  if (!process.env.KANBAN_DB_PATH) return false;
+  if (url.searchParams.get('board')) return false;
+
+  const board = (process.env.KUIPER_DEFAULT_BOARD || 'hub-delivery').trim();
+  const params = new URLSearchParams({ board });
+  const org = url.searchParams.get('org');
+  const theme = url.searchParams.get('theme');
+  const card = url.searchParams.get('card');
+  if (org) params.set('org', org);
+  if (theme) params.set('theme', theme);
+  if (card) params.set('card', card);
+
+  res.writeHead(302, { Location: `/?${params.toString()}` });
+  res.end();
+  return true;
+}
+
 async function route(req, res, db) {
   const url = new URL(req.url, 'http://localhost');
   const urlPath = url.pathname;
@@ -354,8 +376,9 @@ async function route(req, res, db) {
   if (urlPath.startsWith('/api/')) {
     return handleApi(req, res, db, urlPath, req.method || 'GET');
   }
+  if (kuiperServeUiRedirect(req, res, url)) return;
   if (serveStatic(req, res, urlPath)) return;
   notFound(res);
 }
 
-module.exports = { route };
+module.exports = { route, kuiperServeUiRedirect };

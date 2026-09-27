@@ -149,7 +149,6 @@ const KuiperWorkspaceAdmin = (() => {
     if (!org) return;
     const u = new URL(location.href);
     if (u.searchParams.get('org') === org) return;
-    u.searchParams.set('kuiper', '1');
     u.searchParams.set('org', org);
     history.replaceState(null, '', `${u.pathname}${u.search}${u.hash}`);
   }

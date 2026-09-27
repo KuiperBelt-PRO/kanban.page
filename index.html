@@ -21,7 +21,6 @@
 <script>
 (function () {
   var p = new URLSearchParams(location.search);
-  if (!p.has('kuiper')) return;
   var theme = p.get('theme');
   if (theme !== 'dark' && theme !== 'light') {
     try {
@@ -177,78 +176,6 @@
   </footer>
 </aside>
 
-<!-- sync: the same board on another device -->
-<section class="sheet" id="sync" hidden role="dialog" aria-modal="true" aria-labelledby="syncTitle">
-  <header class="panel-head">
-    <h2 id="syncTitle">Sync</h2>
-    <button class="icon" data-close></button>
-  </header>
-
-  <div class="sheet-body">
-    <h3 class="sync-state-title" id="sync-state-title" tabindex="-1"></h3>
-    <p class="sync-say" id="sync-say" aria-live="polite"></p>
-
-    <form class="sync-join" id="sync-join" hidden>
-      <label for="sync-join-input" id="sync-join-label">Paste sync link</label>
-      <div class="sync-join-line">
-        <input id="sync-join-input" type="text" spellcheck="false" autocomplete="off">
-        <button class="primary" id="sync-join-go" type="submit">Continue</button>
-      </div>
-    </form>
-
-    <div class="sync-choice" id="sync-choice" hidden>
-      <button class="sync-option" id="sync-replace" aria-describedby="sync-replace-desc">
-        <span class="sync-option-top"><strong id="sync-replace-label"></strong><span id="sync-linked-signature"></span></span>
-        <span id="sync-replace-desc"></span>
-      </button>
-      <button class="sync-option secondary" id="sync-combine" aria-describedby="sync-combine-desc">
-        <span class="sync-option-top"><strong id="sync-combine-label"></strong><span id="sync-local-signature"></span></span>
-        <span id="sync-combine-desc"></span>
-      </button>
-      <button class="text-action" id="sync-export" type="button"></button>
-    </div>
-
-    <div class="sync-pair" id="sync-pair" hidden>
-      <div class="qr" id="sync-qr"></div>
-      <div class="sync-link">
-        <p class="sync-line" id="sync-scan"></p>
-        <div class="cmd-input" id="sync-url-wrap">
-          <input id="sync-url" type="text" readonly spellcheck="false">
-          <button class="icon sm" id="sync-copy" title="Copy"></button>
-        </div>
-        <p class="sync-warn" id="sync-warn"></p>
-        <details class="sync-cli" id="sync-cli">
-          <summary class="text-action" id="sync-cli-summary"></summary>
-          <p class="sync-cli-say" id="sync-cli-say"></p>
-          <pre class="sync-cli-cmd" id="sync-cli-cmd"></pre>
-        </details>
-      </div>
-    </div>
-
-    <div class="sync-actions" id="sync-actions" hidden>
-      <button class="sync-action" id="sync-stop">
-        <strong id="sync-stop-label"></strong>
-        <span id="sync-stop-desc"></span>
-      </button>
-      <button class="sync-action danger" id="sync-del">
-        <strong id="sync-del-label"></strong>
-        <span id="sync-del-desc"></span>
-      </button>
-    </div>
-  </div>
-
-  <footer class="sheet-foot">
-    <span class="count" id="sync-status" role="status"></span>
-    <span class="grow"></span>
-    <button class="ghost" id="sync-view" hidden>View current sync</button>
-    <button class="ghost" id="sync-cancel" hidden>Cancel</button>
-    <button class="ghost danger" id="sync-end-confirm" hidden>End sync</button>
-    <button class="primary" id="sync-retry" hidden>Try again</button>
-    <button class="ghost" id="sync-join-open" hidden>Join with a sync link</button>
-    <button class="primary" id="sync-enable">Start syncing this board</button>
-  </footer>
-</section>
-
 <!-- menu -->
 <div class="menu" id="menu" hidden>
   <button data-act="projects">Projects<kbd>P</kbd></button>
@@ -262,7 +189,6 @@
   <hr>
   <button data-act="export">Export backup</button>
   <button data-act="import">Import backup</button>
-  <button data-act="sync" id="act-sync" aria-pressed="false">Sync devices<span class="tick">&#10003;</span></button>
   <hr>
   <div class="menu-label" id="languageLabel">Language</div>
   <div role="group" aria-label="Language" id="languageChoices">

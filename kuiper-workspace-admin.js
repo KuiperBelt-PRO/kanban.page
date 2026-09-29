@@ -72,13 +72,14 @@ const KuiperWorkspaceAdmin = (() => {
     return window.confirm(`${tr('workspaceAdminArchiveTitle', { name })}\n\n${tr('workspaceAdminArchiveMsg', { name })}`);
   }
 
-  async function confirmDeleteEntity(name) {
+  async function confirmDeleteEntity(name, { message } = {}) {
     const C = typeof KuiperConfirm !== 'undefined' ? KuiperConfirm : null;
     const word = tr('deleteConfirmWord');
+    const msg = message || tr('workspaceAdminDeleteMsg', { name });
     if (C) {
       return C.confirmDelete({
         title: tr('workspaceAdminDeleteTitle', { name }),
-        message: tr('workspaceAdminDeleteMsg', { name }),
+        message: msg,
         typeWord: word,
         placeholder: tr('deleteConfirmInputPlaceholder', { word }),
         confirmLabel: tr('delete'),
@@ -90,6 +91,18 @@ const KuiperWorkspaceAdmin = (() => {
       '',
     );
     return typed?.trim().toLowerCase() === word.toLowerCase();
+  }
+
+  function formatProjectDeletionMessage(impact) {
+    const parts = [tr('workspaceAdminDeleteProjectIntro', { name: impact.project_name })];
+    if (impact.cards > 0) parts.push(tr('workspaceAdminDeleteProjectCards', { count: impact.cards }));
+    if (impact.subtasks > 0) parts.push(tr('workspaceAdminDeleteProjectSubtasks', { count: impact.subtasks }));
+    if (impact.epics > 0) parts.push(tr('workspaceAdminDeleteProjectEpics', { count: impact.epics }));
+    if (impact.board_links > 0) parts.push(tr('workspaceAdminDeleteProjectBoardLinks', { count: impact.board_links }));
+    if (impact.sprint_links > 0) parts.push(tr('workspaceAdminDeleteProjectSprintLinks', { count: impact.sprint_links }));
+    if (impact.github_repos > 0) parts.push(tr('workspaceAdminDeleteProjectRepos', { count: impact.github_repos }));
+    parts.push(tr('workspaceAdminDeleteProjectWarn'));
+    return parts.join('\n');
   }
 
   function entityActionButtons({ archived, archiveAct, restoreAct, deleteAct, slugAttr, slug }) {
@@ -947,9 +960,11 @@ const KuiperWorkspaceAdmin = (() => {
         const id = btn.dataset.projectId;
         const p = projects.find(x => x.id === id);
         const name = p?.name || id;
-        if (!await confirmDeleteEntity(name)) return;
         try {
-          await KuiperStore.deleteProject(id);
+          const impact = await KuiperStore.projectDeletionImpact(id);
+          const message = formatProjectDeletionMessage(impact);
+          if (!await confirmDeleteEntity(name, { message })) return;
+          await KuiperStore.deleteProject(id, { force: true });
           ctx.toast?.(tr('workspaceAdminDeletedToast'));
           await reloadBoard();
           await renderBody();
@@ -968,10 +983,15 @@ const KuiperWorkspaceAdmin = (() => {
   }
 
   async function renderTagsTab(body) {
-    const slug = boardSlug();
-    const tags = await KuiperStore.listBoardTags(slug);
+    const slug = orgSlug();
+    if (!slug) {
+      body.innerHTML = `<p class="faint">${esc(tr('workspaceAdminNeedsOrg'))}</p>`;
+      return;
+    }
+    const tags = await KuiperStore.listOrgTags(slug);
     body.innerHTML = `
       <section class="kuiper-ws-section">
+        <p class="faint kuiper-ws-hint">${esc(tr('workspaceAdminTagsOrgHint'))}</p>
         <div class="kuiper-ws-row">
           <input type="text" class="kuiper-ws-input" id="kuiperWsNewTag" placeholder="${esc(tr('workspaceAdminNewTag'))}">
           <button type="button" class="pill sm" data-act="add-tag">${esc(tr('create'))}</button>
@@ -1005,7 +1025,7 @@ const KuiperWorkspaceAdmin = (() => {
     body.querySelector('[data-act="add-tag"]').onclick = async () => {
       const name = body.querySelector('#kuiperWsNewTag').value.trim();
       if (!name) return;
-      await KuiperStore.createBoardTag(boardSlug(), name);
+      await KuiperStore.createOrgTag(slug, name);
       await reloadBoard();
       renderBody();
     };

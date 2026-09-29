@@ -101,19 +101,58 @@ function update(db, id, fields) {
   return getById(db, id);
 }
 
-function remove(db, id) {
+function deletionImpact(db, id) {
   const project = getById(db, id);
   if (!project) throw new Error('project not found');
-  const n = db.prepare('SELECT COUNT(*) AS c FROM cards WHERE project_id = ?').get(id);
-  if (n.c > 0) throw new Error('project has cards');
+  const cards = db.prepare('SELECT COUNT(*) AS c FROM cards WHERE project_id = ?').get(id).c;
+  const archivedCards = db.prepare('SELECT COUNT(*) AS c FROM cards WHERE project_id = ? AND archived = 1').get(id).c;
+  const subtasks = db.prepare(`
+    SELECT COUNT(*) AS c FROM cards WHERE project_id = ? AND issue_type = 'subtask'
+  `).get(id).c;
+  const epics = db.prepare('SELECT COUNT(*) AS c FROM epics WHERE project_id = ?').get(id).c;
+  const boardLinks = db.prepare('SELECT COUNT(*) AS c FROM board_projects WHERE project_id = ?').get(id).c;
+  const sprintLinks = db.prepare('SELECT COUNT(*) AS c FROM sprint_projects WHERE project_id = ?').get(id).c;
+  const repos = db.prepare('SELECT COUNT(*) AS c FROM project_github_repos WHERE project_id = ?').get(id).c;
+  return {
+    project_id: id,
+    project_name: project.name,
+    cards,
+    archived_cards: archivedCards,
+    subtasks,
+    epics,
+    board_links: boardLinks,
+    sprint_links: sprintLinks,
+    github_repos: repos,
+  };
+}
+
+function remove(db, id, { force = false } = {}) {
+  const project = getById(db, id);
+  if (!project) throw new Error('project not found');
+  const impact = deletionImpact(db, id);
+  if (impact.cards > 0 && !force) throw new Error('project has cards; use force after confirmation');
+  const cardsRepo = require('./cards.js');
+  const boardsRepo = require('./boards.js');
+  const boardIds = new Set(
+    db.prepare('SELECT DISTINCT board_id AS id FROM cards WHERE project_id = ?').all(id).map(r => r.id),
+  );
+  const cardRows = db.prepare('SELECT id FROM cards WHERE project_id = ?').all(id);
+  const idSet = new Set(cardRows.map(r => r.id));
+  const roots = cardRows.filter(r => {
+    const parent = db.prepare('SELECT parent_id FROM cards WHERE id = ?').get(r.id);
+    return !parent.parent_id || !idSet.has(parent.parent_id);
+  });
+  for (const root of roots) cardsRepo.removeCardTree(db, root.id);
   db.prepare('DELETE FROM board_projects WHERE project_id = ?').run(id);
   db.prepare('DELETE FROM sprint_projects WHERE project_id = ?').run(id);
   db.prepare('DELETE FROM project_github_repos WHERE project_id = ?').run(id);
   db.prepare('DELETE FROM epics WHERE project_id = ?').run(id);
   db.prepare('DELETE FROM projects WHERE id = ?').run(id);
-  return { removed: true };
+  for (const boardId of boardIds) boardsRepo.bumpVersion(db, boardId);
+  return { removed: true, impact };
 }
 
 module.exports = {
-  create, getById, getByOrgSlug, listByOrg, listByOrgAdmin, linkRepo, listRepos, ensureCode, update, remove,
+  create, getById, getByOrgSlug, listByOrg, listByOrgAdmin, linkRepo, listRepos,
+  ensureCode, update, deletionImpact, remove,
 };

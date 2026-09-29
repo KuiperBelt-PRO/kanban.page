@@ -173,6 +173,18 @@ async function handleApi(req, res, db, urlPath, method) {
       return badRequest(res, err.message);
     }
   }
+  if (cardCommentPatchMatch && method === 'DELETE') {
+    try {
+      const cardId = decodeURIComponent(cardCommentPatchMatch[1]);
+      const commentId = decodeURIComponent(cardCommentPatchMatch[2]);
+      comments.remove(db, cardId, commentId);
+      const card = cards.getById(db, cardId);
+      boards.bumpVersion(db, card.board_id);
+      return sendJson(res, 200, { ok: true, data: { removed: true } });
+    } catch (err) {
+      return badRequest(res, err.message);
+    }
+  }
 
   const cardTimeMatch = urlPath.match(/^\/api\/v1\/cards\/([^/]+)\/time-entries$/);
   if (cardTimeMatch && method === 'POST') {
@@ -259,10 +271,23 @@ async function handleApi(req, res, db, urlPath, method) {
   }
 
   const cardMatch = urlPath.match(/^\/api\/v1\/cards\/([^/]+)$/);
+  if (cardMatch && method === 'DELETE') {
+    try {
+      const id = decodeURIComponent(cardMatch[1]);
+      const data = cards.remove(db, id);
+      return sendJson(res, 200, { ok: true, data });
+    } catch (err) {
+      return badRequest(res, err.message);
+    }
+  }
   if (cardMatch && method === 'PATCH') {
     try {
       const id = decodeURIComponent(cardMatch[1]);
       const body = await readBody(req);
+      if (body.archived !== undefined) {
+        const card = cards.archive(db, id, !!body.archived);
+        return sendJson(res, 200, { ok: true, data: { card } });
+      }
       if (body.stage_id || body.stage) {
         const result = cards.move(db, id, body);
         const rest = { ...body };

@@ -307,8 +307,11 @@ const KuiperUI = (() => {
   function cardIdRowHtml(t) {
     const icon = issueTypeMarkHtml(t?.issueType || 'task', { size: 'sm' });
     const html = cardIdButtonHtml(t?.id);
-    if (!html && !icon) return '';
-    return `<div class="kuiper-card-id-wrap">${icon}${html || ''}</div>`;
+    const badge = buildCardSubtaskBadgeHtml(t);
+    if (!html && !icon && !badge) return '';
+    const idInner = `<div class="kuiper-card-id-wrap">${icon}${html || ''}</div>`;
+    if (!badge) return idInner;
+    return `<div class="kuiper-card-head-row">${idInner}${badge}</div>`;
   }
 
   function refreshBoardCard(task) {
@@ -318,12 +321,12 @@ const KuiperUI = (() => {
     const h3 = el.querySelector('h3');
     if (h3) h3.textContent = task.title;
     el.classList.toggle('has-pri', (task.priority || 0) > 0);
-    const idWrap = el.querySelector('.kuiper-card-id-wrap');
+    const headEl = el.querySelector('.kuiper-card-head-row') || el.querySelector('.kuiper-card-id-wrap');
     const idHtml = cardIdRowHtml(task);
-    if (idWrap && idHtml) {
+    if (headEl && idHtml) {
       const tmp = document.createElement('div');
       tmp.innerHTML = idHtml;
-      idWrap.replaceWith(tmp.firstElementChild);
+      headEl.replaceWith(tmp.firstElementChild);
       bindCardIdButtons(el);
     }
     const flag = el.querySelector('.flag');
@@ -2041,12 +2044,28 @@ const KuiperUI = (() => {
     return {};
   }
 
-  function buildSubtaskProgress(t) {
+  function subtaskProgressCounts(t) {
     const list = subtasksOf(t.id);
-    if (!list.length) return '';
+    if (!list.length) return null;
     const cols = ctx.state?.()?.columns || [];
     const done = list.filter(s => BoardCore.subtaskIsDone(s, cols)).length;
-    return `<div class="kuiper-card-subtasks" title="${esc(tr('subtasks'))}">${done}/${list.length}</div>`;
+    return { done, total: list.length };
+  }
+
+  function buildCardSubtaskBadgeHtml(t) {
+    const counts = subtaskProgressCounts(t);
+    if (!counts) return '';
+    const { done, total } = counts;
+    const allDone = done === total && total > 0;
+    const label = `${done}/${total}`;
+    return `<span class="kuiper-card-subtasks-badge${allDone ? ' is-complete' : ''}" title="${esc(tr('subtasks'))}" aria-label="${esc(`${label} ${tr('subtasks')}`)}">
+      <span class="kuiper-card-subtasks-mark">${issueTypeMarkHtml('subtask', { size: 'sm' })}</span>
+      <span class="kuiper-card-subtasks-count">${label}</span>
+    </span>`;
+  }
+
+  function cardHeadingHtml(t) {
+    return `<h3>${esc(t.title)}</h3>`;
   }
 
   function buildCardProgress(t) {
@@ -2093,7 +2112,6 @@ const KuiperUI = (() => {
   function buildCardMeta(t, project) {
     const epic = t.epicId ? epicOf(t.epicId) : null;
     const progressHtml = buildCardProgress(t);
-    const subtasksHtml = buildSubtaskProgress(t);
     const linksHtml = buildCardLinks(t);
     const scopeRows = [];
     if (project) {
@@ -2113,8 +2131,8 @@ const KuiperUI = (() => {
     const footHtml = (scopeHtml || labelsHtml)
       ? `<div class="kuiper-card-foot">${scopeHtml}${labelsHtml}</div>`
       : '';
-    if (!progressHtml && !subtasksHtml && !linksHtml && !footHtml) return '';
-    return `${progressHtml}${subtasksHtml}${footHtml}${linksHtml}`;
+    if (!progressHtml && !linksHtml && !footHtml) return '';
+    return `${progressHtml}${footHtml}${linksHtml}`;
   }
 
   function decorateCardMeta(t, metaHtml) {
@@ -2505,20 +2523,28 @@ const KuiperUI = (() => {
         sprintId: null,
         columnId,
       });
-      await KuiperStore.createCard(body);
-      await ctx.refreshKuiperBoard?.();
+      const created = await KuiperStore.createCard(body);
+      const row = created?.card || created;
+      ctx.mergeKuiperCardRow?.(row);
       if (inputEl) inputEl.value = '';
       renderSubtasksPanel(parentId);
       if (typeof KuiperIssuePanel !== 'undefined') KuiperIssuePanel.refreshSubtasksTab?.();
-      ctx.renderBoard?.();
+      await ctx.refreshKuiperBoard?.();
+      renderSubtasksPanel(parentId);
+      if (typeof KuiperIssuePanel !== 'undefined') KuiperIssuePanel.refreshSubtasksTab?.();
     } catch (err) {
       console.warn('subtask create failed', err);
       ctx.toast?.(tr('scheduleSaveFailed'), null, undefined, 'error');
     }
   }
 
+  function subtasksPanelEl() {
+    return document.querySelector('#kuiperIssueTabs [data-panel="subtasks"] #kuiperSubtasksPanel')
+      || document.getElementById('kuiperSubtasksPanel');
+  }
+
   function renderSubtasksPanel(parentId) {
-    const block = document.getElementById('kuiperSubtasksPanel');
+    const block = subtasksPanelEl();
     if (!block || !parentId || parentId === 'new') return;
     const list = subtasksOf(parentId);
     const cols = BoardCore.sortedStages(ctx.state?.()?.columns || []);
@@ -3490,6 +3516,7 @@ const KuiperUI = (() => {
     defaultsForLane,
     decorateCardMeta,
     buildCardMeta,
+    cardHeadingHtml,
     cardIdRowHtml,
     refreshBoardCard,
     cardIdButtonHtml,

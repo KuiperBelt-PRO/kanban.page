@@ -181,10 +181,48 @@ async function kuiperSyncToServer() {
 }
 
 function refreshKuiperBoard() {
-  loadKuiperBoard().then(() => render()).catch(err => {
-    console.warn('kuiper refresh failed —', err);
-    toast(locale === 'es' ? 'No se pudo refrescar el tablero' : 'Could not refresh board', null, 5000, 'error');
-  });
+  return loadKuiperBoard()
+    .then(() => render())
+    .catch(err => {
+      console.warn('kuiper refresh failed —', err);
+      toast(locale === 'es' ? 'No se pudo refrescar el tablero' : 'Could not refresh board', null, 5000, 'error');
+      throw err;
+    });
+}
+
+function kuiperMergeCardRow(card) {
+  if (!card?.id) return;
+  const now = Date.now();
+  const task = {
+    id: card.id,
+    title: card.title,
+    notes: card.notes || '',
+    projectId: card.project_id,
+    epicId: card.epic_id || null,
+    sprintId: card.sprint_id || null,
+    issueType: card.issue_type || 'task',
+    parentId: card.parent_id || null,
+    priority: card.priority != null ? card.priority : 0,
+    estimatedMinutes: card.estimated_minutes != null ? card.estimated_minutes : null,
+    tags: (card.tags || []).map(t => (typeof t === 'string' ? t : t.name)),
+    blockedBy: [],
+    blocks: [],
+    related: [],
+    scheduleStartDate: card.schedule_start_date || null,
+    scheduleEndDate: card.schedule_end_date || null,
+    timeLoggedMinutes: card.time_logged_minutes || 0,
+    activeTimer: null,
+    session: card.session_ref || '',
+    flag: !!card.flagged,
+    columnId: card.stage_id,
+    order: card.position,
+    createdAt: Date.parse(card.created_at) || now,
+    updatedAt: Date.parse(card.updated_at) || now,
+  };
+  const rows = state.tasks || (state.tasks = []);
+  const i = rows.findIndex(t => t.id === task.id);
+  if (i >= 0) rows[i] = { ...rows[i], ...task };
+  else rows.push(task);
 }
 
 function applyLocale() {
@@ -694,7 +732,7 @@ function cardEl(t) {
     <button class="flag" title="${t.flag ? 'Unflag' : 'Flag  F'}" aria-pressed="${t.flag ? 'true' : 'false'}">${t.flag ? ICON.starFill : ICON.star}</button>
     ${kuiper ? KuiperUI.cardPriorityBadge(t) : ''}
     ${kuiper ? KuiperUI.cardIdRowHtml(t) : ''}
-    <h3>${esc(t.title)}</h3>
+    ${kuiper ? KuiperUI.cardHeadingHtml(t) : `<h3>${esc(t.title)}</h3>`}
     ${t.notes ? `<p class="note">${esc(t.notes)}</p>` : ''}
     ${metaBlock}
     ${!kuiper && t.session ? `<button class="chip" title="Copy session command">
@@ -2574,6 +2612,7 @@ window.__board = {
       byId: id => byId(id),
       openEditor: (id, options = {}) => openEditor(id, undefined, options),
       refreshKuiperBoard: () => refreshKuiperBoard(),
+      mergeKuiperCardRow: row => kuiperMergeCardRow(row),
       isEditorOpen: id => !editor.hidden && editing === id,
       copyText,
       toast,
@@ -2587,14 +2626,29 @@ window.__board = {
         if (t) persistEditorDraft({ rerender: false });
         closeEditor();
         if (!t) return;
-        archiveTasks([t]);
-        toast(tr('taskArchived'), undo);
+        (async () => {
+          try {
+            await KuiperStore.patchCard(t.id, { archived: true });
+            await refreshKuiperBoard();
+            toast(tr('taskArchived'));
+          } catch (err) {
+            console.warn('kuiper archive failed —', err);
+            toast(err.message || tr('saveFailed'), null, undefined, 'error');
+          }
+        })();
       },
       deleteEditorTask: id => {
         closeEditor();
-        deleteForever([id]);
-        save();
-        render();
+        (async () => {
+          try {
+            await KuiperStore.deleteCard(id);
+            await refreshKuiperBoard();
+            toast(locale === 'es' ? 'Tarea eliminada' : 'Task deleted');
+          } catch (err) {
+            console.warn('kuiper delete failed —', err);
+            toast(err.message || tr('saveFailed'), null, undefined, 'error');
+          }
+        })();
       },
       loadKuiperBoard,
       resetOrgContext: resetKuiperOrgContext,

@@ -16,12 +16,16 @@ let tmpDir;
 
 function request(method, path, body) {
   return new Promise((resolve, reject) => {
+    const payload = body != null ? JSON.stringify(body) : null;
     const opts = {
       hostname: '127.0.0.1',
       port,
       path,
       method,
-      headers: body ? { 'Content-Type': 'application/json' } : undefined,
+      headers: payload ? {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(payload),
+      } : undefined,
     };
     const req = http.request(opts, res => {
       let data = '';
@@ -32,7 +36,7 @@ function request(method, path, body) {
       }));
     });
     req.on('error', reject);
-    if (body) req.write(JSON.stringify(body));
+    if (payload) req.write(payload);
     req.end();
   });
 }
@@ -263,11 +267,17 @@ describe('api', () => {
     const sprintId = created.body.data.sprint.id;
     assert.ok(sprintId);
 
-    const cardId = board.body.data.cards[0].id;
+    const cardRow = board.body.data.cards.find(
+      c => (c.issue_type === 'task' || c.issue_type === 'story') && projectIds.includes(c.project_id),
+    ) || board.body.data.cards.find(
+      c => c.issue_type !== 'subtask' && c.issue_type !== 'epic' && projectIds.includes(c.project_id),
+    );
+    assert.ok(cardRow, 'need a task or story card for sprint patch');
+    const cardId = cardRow.id;
     const patched = await request('PATCH', `/api/v1/cards/${encodeURIComponent(cardId)}`, {
       sprint_id: sprintId,
     });
-    assert.equal(patched.status, 200);
+    assert.equal(patched.status, 200, JSON.stringify(patched.body));
     assert.equal(patched.body.data.card.sprint_id, sprintId);
 
     const state = await get('/api/v1/boards/hub-delivery/state');
@@ -482,5 +492,139 @@ describe('api', () => {
     const state = await get('/api/v1/boards/hub-delivery/state');
     const task = state.body.data.tasks.find(t => t.id === cardId);
     assert.equal(task.columnId, prevStage.id);
+  });
+
+  it('archives and restores subtasks in cascade with parent', async () => {
+    const board = await get('/api/v1/boards/hub-delivery/state');
+    const parent = board.body.data.tasks.find(t => t.issueType !== 'subtask');
+    assert.ok(parent);
+    const sub = await request('POST', '/api/v1/cards', {
+      board_slug: 'hub-delivery',
+      project_id: parent.projectId,
+      parent_id: parent.id,
+      issue_type: 'subtask',
+      title: 'Cascade archive sub',
+    });
+    assert.equal(sub.status, 201);
+    const subId = sub.body.data.card.id;
+    const archived = await request('PATCH', `/api/v1/cards/${encodeURIComponent(parent.id)}`, { archived: true });
+    assert.equal(archived.status, 200);
+    const subRow = await get(`/api/v1/cards/${encodeURIComponent(subId)}/detail`);
+    assert.equal(subRow.status, 200);
+    assert.ok(subRow.body.data.card.archived);
+    const restored = await request('PATCH', `/api/v1/cards/${encodeURIComponent(parent.id)}`, { archived: false });
+    assert.equal(restored.status, 200);
+    const subBack = await get(`/api/v1/cards/${encodeURIComponent(subId)}/detail`);
+    assert.equal(subBack.status, 200);
+    assert.ok(!subBack.body.data.card.archived);
+  });
+
+  it('restore parent leaves already-archived subtasks archived', async () => {
+    const board = await get('/api/v1/boards/hub-delivery/state');
+    const parent = board.body.data.tasks.find(t => t.issueType !== 'subtask');
+    assert.ok(parent);
+    const subActive = await request('POST', '/api/v1/cards', {
+      board_slug: 'hub-delivery',
+      project_id: parent.projectId,
+      parent_id: parent.id,
+      issue_type: 'subtask',
+      title: 'Was active before parent archive',
+    });
+    const subWasArchived = await request('POST', '/api/v1/cards', {
+      board_slug: 'hub-delivery',
+      project_id: parent.projectId,
+      parent_id: parent.id,
+      issue_type: 'subtask',
+      title: 'Already archived alone',
+    });
+    assert.equal(subActive.status, 201);
+    assert.equal(subWasArchived.status, 201);
+    const activeId = subActive.body.data.card.id;
+    const archivedId = subWasArchived.body.data.card.id;
+    await request('PATCH', `/api/v1/cards/${encodeURIComponent(archivedId)}`, { archived: true });
+    await request('PATCH', `/api/v1/cards/${encodeURIComponent(parent.id)}`, { archived: true });
+    const restored = await request('PATCH', `/api/v1/cards/${encodeURIComponent(parent.id)}`, { archived: false });
+    assert.equal(restored.status, 200);
+    const activeBack = await get(`/api/v1/cards/${encodeURIComponent(activeId)}/detail`);
+    const stillArchived = await get(`/api/v1/cards/${encodeURIComponent(archivedId)}/detail`);
+    assert.ok(!activeBack.body.data.card.archived);
+    assert.ok(stillArchived.body.data.card.archived);
+  });
+
+  it('deletes subtasks when parent is deleted', async () => {
+    const board = await get('/api/v1/boards/hub-delivery/state');
+    const parentTask = board.body.data.tasks.find(t => t.issueType !== 'subtask');
+    const created = await request('POST', '/api/v1/cards', {
+      board_slug: 'hub-delivery',
+      project_id: parentTask.projectId,
+      title: 'Parent to delete',
+    });
+    assert.equal(created.status, 201);
+    const parentId = created.body.data.card.id;
+    const sub = await request('POST', '/api/v1/cards', {
+      board_slug: 'hub-delivery',
+      project_id: parentTask.projectId,
+      parent_id: parentId,
+      issue_type: 'subtask',
+      title: 'Child to delete',
+    });
+    assert.equal(sub.status, 201);
+    const subId = sub.body.data.card.id;
+    const del = await request('DELETE', `/api/v1/cards/${encodeURIComponent(parentId)}`);
+    assert.equal(del.status, 200);
+    const goneParent = await get(`/api/v1/cards/${encodeURIComponent(parentId)}/detail`);
+    assert.equal(goneParent.status, 404);
+    const goneSub = await get(`/api/v1/cards/${encodeURIComponent(subId)}/detail`);
+    assert.equal(goneSub.status, 404);
+  });
+
+  it('deletes card comment via DELETE', async () => {
+    const board = await get('/api/v1/boards/hub-delivery/state');
+    const task = board.body.data.tasks[0];
+    assert.ok(task);
+    const comment = await request('POST', `/api/v1/cards/${encodeURIComponent(task.id)}/comments`, {
+      body: 'To remove',
+    });
+    assert.equal(comment.status, 201);
+    const commentId = comment.body.data.comment.id;
+    const del = await request('DELETE', `/api/v1/cards/${encodeURIComponent(task.id)}/comments/${encodeURIComponent(commentId)}`);
+    assert.equal(del.status, 200);
+    const detail = await get(`/api/v1/cards/${encodeURIComponent(task.id)}/detail`);
+    assert.ok(!detail.body.data.comments.some(c => c.id === commentId));
+  });
+
+  it('force-deletes project and all cards after impact', async () => {
+    const org = await request('POST', '/api/v1/organizations', { name: 'Delete Project Org' });
+    const orgSlug = org.body.data.organization.slug;
+    const proj = await request('POST', `/api/v1/organizations/${encodeURIComponent(orgSlug)}/projects`, {
+      name: 'Doomed',
+    });
+    const projectId = proj.body.data.project.id;
+    const impact = await get(`/api/v1/projects/${encodeURIComponent(projectId)}/deletion-impact`);
+    assert.equal(impact.status, 200);
+    assert.equal(impact.body.data.impact.cards, 0);
+    const board = await request('POST', `/api/v1/organizations/${encodeURIComponent(orgSlug)}/boards`, {
+      name: 'Tmp board',
+    });
+    const boardSlug = board.body.data.board.slug;
+    await request('POST', `/api/v1/boards/${encodeURIComponent(boardSlug)}/projects?org=${encodeURIComponent(orgSlug)}`, { project_id: projectId });
+    const mem = await get(`/api/v1/boards/${encodeURIComponent(boardSlug)}/membership?org=${encodeURIComponent(orgSlug)}`);
+    const stageId = mem.body.data.stages[0].id;
+    const card = await request('POST', '/api/v1/cards', {
+      board_slug: boardSlug,
+      organization_slug: orgSlug,
+      project_id: projectId,
+      stage_id: stageId,
+      title: 'Card in doomed project',
+    });
+    assert.equal(card.status, 201);
+    const impact2 = await get(`/api/v1/projects/${encodeURIComponent(projectId)}/deletion-impact`);
+    assert.ok(impact2.body.data.impact.cards >= 1);
+    const blocked = await request('DELETE', `/api/v1/projects/${encodeURIComponent(projectId)}`, {});
+    assert.equal(blocked.status, 400);
+    const removed = await request('DELETE', `/api/v1/projects/${encodeURIComponent(projectId)}`, { force: true });
+    assert.equal(removed.status, 200);
+    const gone = await get(`/api/v1/projects/${encodeURIComponent(projectId)}/deletion-impact`);
+    assert.equal(gone.status, 400);
   });
 });

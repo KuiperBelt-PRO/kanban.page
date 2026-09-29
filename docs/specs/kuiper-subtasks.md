@@ -70,8 +70,8 @@ stateDiagram-v2
    - Subtarea: no permitir `parent_id` nulo ni cambiar a tipo no-subtarea sin flujo explícito de «convertir a tarea» (fuera de alcance v1; bloquear o exigir `issue_type` distinto y limpiar `parent_id` en una sola operación).
    - Si se cambia `parent_id`, revalidar ST-1.3 y re-sincronizar herencia.
    - Si se actualiza el **padre** (`project_id` o `epic_id`), **propagar** esos valores a todas las subtareas activas (`archived = 0`) con `parent_id = id`. El `sprint_id` del padre **no** se propaga.
-3. **Archivar padre:** archivar en cascada todas las subtareas hijas.
-4. **Restaurar padre:** opcional v1 — restaurar hijas que se archivaron en la misma operación (mismo timestamp de evento); si es complejo, documentar «restaurar hijas manualmente» en v1.
+3. **Archivar padre:** archivar en cascada todas las subtareas hijas **activas** (`archived = 0`). Las que ya estaban archivadas no se incluyen. El evento `archived` del padre guarda `cascaded_subtask_ids`.
+4. **Restaurar padre:** restaurar solo las subtareas listadas en el último evento `archived` del padre (las que se archivaron por esa cascada). Las que ya estaban archivadas antes siguen archivadas.
 5. **Detalle** (`GET /cards/:id/detail`): incluir `subtasks: CardSummary[]` ordenadas por `position` luego `created_at` (id, título, `stage_id`, `issue_type`, flags de progreso si aplica).
 
 **Errores:**
@@ -105,7 +105,7 @@ stateDiagram-v2
 
 **Tarjeta del padre (`.kuiper-card`):**
 
-- Línea opcional de progreso de subtareas: `3/5` o barra fina si hay al menos una subtarea.
+- En la **cabecera** de la tarjeta (fila tipo + id, `.kuiper-card-head-row`): icono de subtarea + progreso `hechas/total` en badge visible.
 - No sustituye la barra de tiempo estimado existente.
 
 ---

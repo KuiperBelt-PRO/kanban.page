@@ -390,33 +390,103 @@ function move(db, id, { stage_id, stage, position }) {
   };
 }
 
-function archive(db, id, archived = true) {
+function getCascadedSubtaskIdsFromLastArchive(db, parentId) {
+  const row = db.prepare(`
+    SELECT payload FROM card_events
+    WHERE card_id = ? AND event_type = 'archived'
+    ORDER BY created_at DESC
+    LIMIT 1
+  `).get(parentId);
+  if (!row?.payload) return [];
+  try {
+    const payload = JSON.parse(row.payload);
+    return Array.isArray(payload.cascaded_subtask_ids) ? payload.cascaded_subtask_ids : [];
+  } catch {
+    return [];
+  }
+}
+
+function archive(db, id, archived = true, { cascadeSubtasks = true } = {}) {
   const card = getById(db, id);
   if (!card) throw new Error('card not found');
   const ts = nowIso();
+  let cascadedSubtaskIds = [];
+
+  if (cascadeSubtasks && card.issue_type !== 'subtask') {
+    if (archived) {
+      const children = db.prepare('SELECT id FROM cards WHERE parent_id = ? AND archived = 0').all(id);
+      cascadedSubtaskIds = children.map(c => c.id);
+    } else {
+      cascadedSubtaskIds = getCascadedSubtaskIdsFromLastArchive(db, id);
+    }
+  }
+
   db.prepare('UPDATE cards SET archived = ?, updated_at = ? WHERE id = ?')
     .run(archived ? 1 : 0, ts, id);
+  const eventPayload = {};
+  if (archived && cascadedSubtaskIds.length) {
+    eventPayload.cascaded_subtask_ids = cascadedSubtaskIds;
+  }
   events.insert(db, {
     card_id: id,
     board_id: card.board_id,
     event_type: archived ? 'archived' : 'restored',
-    payload: {},
+    payload: eventPayload,
   });
-  if (archived && card.issue_type !== 'subtask') {
-    const children = db.prepare('SELECT id FROM cards WHERE parent_id = ? AND archived = 0').all(id);
-    for (const child of children) archive(db, child.id, true);
+
+  if (cascadeSubtasks && card.issue_type !== 'subtask') {
+    if (archived) {
+      for (const childId of cascadedSubtaskIds) {
+        archive(db, childId, true, { cascadeSubtasks: false });
+      }
+    } else {
+      for (const childId of cascadedSubtaskIds) {
+        const child = db.prepare('SELECT archived, parent_id FROM cards WHERE id = ?').get(childId);
+        if (child && child.archived === 1 && child.parent_id === id) {
+          archive(db, childId, false, { cascadeSubtasks: false });
+        }
+      }
+    }
   }
+
   boards.bumpVersion(db, card.board_id);
   return getById(db, id);
+}
+
+function removeCardTree(db, cardId) {
+  const card = db.prepare('SELECT board_id FROM cards WHERE id = ?').get(cardId);
+  if (!card) return null;
+  const children = db.prepare('SELECT id FROM cards WHERE parent_id = ?').all(cardId);
+  for (const child of children) removeCardTree(db, child.id);
+  db.prepare('DELETE FROM card_events WHERE card_id = ?').run(cardId);
+  db.prepare('DELETE FROM cards WHERE id = ?').run(cardId);
+  return card.board_id;
+}
+
+function remove(db, id) {
+  const card = getById(db, id);
+  if (!card) throw new Error('card not found');
+  const boardId = removeCardTree(db, id);
+  if (boardId) boards.bumpVersion(db, boardId);
+  return { removed: true, id };
+}
+
+function listByProject(db, projectId, { includeArchived = true } = {}) {
+  let sql = 'SELECT * FROM cards WHERE project_id = ?';
+  if (!includeArchived) sql += ' AND archived = 0';
+  return db.prepare(sql).all(projectId);
 }
 
 module.exports = {
   getById,
   listByBoard,
+  listByProject,
   listSubtasks,
   create,
   update,
   move,
   archive,
+  remove,
+  removeCardTree,
   resolveStage,
 };

@@ -48,6 +48,10 @@ const KuiperStore = (() => {
     });
   }
 
+  async function deleteCard(id) {
+    return request(`/api/v1/cards/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  }
+
   async function createCard(body) {
     return request('/api/v1/cards', {
       method: 'POST',
@@ -76,6 +80,12 @@ const KuiperStore = (() => {
     return request(`/api/v1/cards/${encodeURIComponent(cardId)}/comments`, {
       method: 'POST',
       body: JSON.stringify({ body }),
+    });
+  }
+
+  async function deleteComment(cardId, commentId) {
+    return request(`/api/v1/cards/${encodeURIComponent(cardId)}/comments/${encodeURIComponent(commentId)}`, {
+      method: 'DELETE',
     });
   }
 
@@ -185,8 +195,29 @@ const KuiperStore = (() => {
     return data.project;
   }
 
-  async function deleteProject(id) {
-    return request(`/api/v1/projects/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  async function deleteProject(id, { force = false } = {}) {
+    return request(`/api/v1/projects/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      body: JSON.stringify({ force }),
+    });
+  }
+
+  async function projectDeletionImpact(id) {
+    const data = await request(`/api/v1/projects/${encodeURIComponent(id)}/deletion-impact`);
+    return data.impact;
+  }
+
+  async function listOrgTags(orgSlug) {
+    const data = await request(`/api/v1/organizations/${encodeURIComponent(orgSlug)}/tags`);
+    return data.tags || [];
+  }
+
+  async function createOrgTag(orgSlug, name) {
+    const data = await request(`/api/v1/organizations/${encodeURIComponent(orgSlug)}/tags`, {
+      method: 'POST',
+      body: JSON.stringify({ name }),
+    });
+    return data.tag;
   }
 
   async function patchBoard(slug, body, opts = {}) {
@@ -329,6 +360,7 @@ const KuiperStore = (() => {
     deleteOrganization,
     deleteBoard,
     patchCard,
+    deleteCard,
     createCard,
     listOrgProjects,
     listOrgBoards,
@@ -336,6 +368,7 @@ const KuiperStore = (() => {
     createOrgProject,
     patchProject,
     deleteProject,
+    projectDeletionImpact,
     patchBoard,
     loadBoardMembership,
     linkBoardProject,
@@ -349,7 +382,9 @@ const KuiperStore = (() => {
     patchEpic,
     deleteEpic,
     listBoardTags,
+    listOrgTags,
     createBoardTag,
+    createOrgTag,
     renameTag,
     deleteTag,
     listOrgSprints,
@@ -361,6 +396,7 @@ const KuiperStore = (() => {
     removeCardLink,
     addComment,
     updateComment,
+    deleteComment,
     addTimeEntry,
     stopTimer,
     discardTimer,

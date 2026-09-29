@@ -44,6 +44,24 @@ async function handleWorkspaceRoutes(req, res, db, urlPath, method, { badRequest
     }
   }
 
+  const orgTags = urlPath.match(/^\/api\/v1\/organizations\/([^/]+)\/tags$/);
+  if (orgTags && method === 'GET') {
+    const org = orgs.getBySlug(db, decodeURIComponent(orgTags[1]));
+    if (!org) return notFound(res);
+    return sendJson(res, 200, { ok: true, data: { tags: tags.listByOrganization(db, org.id) } });
+  }
+  if (orgTags && method === 'POST') {
+    try {
+      const org = orgs.getBySlug(db, decodeURIComponent(orgTags[1]));
+      if (!org) return notFound(res);
+      const body = await readBody(req);
+      const tag = tags.createForOrganization(db, org.id, body.name);
+      return sendJson(res, 201, { ok: true, data: { tag } });
+    } catch (err) {
+      return badRequest(res, err.message);
+    }
+  }
+
   const orgSprints = urlPath.match(/^\/api\/v1\/organizations\/([^/]+)\/sprints$/);
   if (orgSprints && method === 'GET') {
     const org = orgs.getBySlug(db, decodeURIComponent(orgSprints[1]));
@@ -133,8 +151,20 @@ async function handleWorkspaceRoutes(req, res, db, urlPath, method, { badRequest
   }
   if (projectPatch && method === 'DELETE') {
     try {
-      const data = projects.remove(db, decodeURIComponent(projectPatch[1]));
+      const body = await readBody(req);
+      const force = !!(body && body.force);
+      const data = projects.remove(db, decodeURIComponent(projectPatch[1]), { force });
       return sendJson(res, 200, { ok: true, data });
+    } catch (err) {
+      return badRequest(res, err.message);
+    }
+  }
+
+  const projectImpact = urlPath.match(/^\/api\/v1\/projects\/([^/]+)\/deletion-impact$/);
+  if (projectImpact && method === 'GET') {
+    try {
+      const impact = projects.deletionImpact(db, decodeURIComponent(projectImpact[1]));
+      return sendJson(res, 200, { ok: true, data: { impact } });
     } catch (err) {
       return badRequest(res, err.message);
     }
@@ -320,8 +350,8 @@ async function handleWorkspaceRoutes(req, res, db, urlPath, method, { badRequest
     try {
       const tag = tags.getById(db, decodeURIComponent(tagId[1]));
       if (!tag) return notFound(res);
-      tags.remove(db, tag.id);
-      boards.bumpVersion(db, tag.board_id);
+      const data = tags.remove(db, tag.id);
+      for (const boardId of data.board_ids || []) boards.bumpVersion(db, boardId);
       return sendJson(res, 200, { ok: true, data: { removed: true } });
     } catch (err) {
       return badRequest(res, err.message);

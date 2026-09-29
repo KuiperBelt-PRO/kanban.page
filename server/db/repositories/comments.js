@@ -58,4 +58,19 @@ function update(db, cardId, commentId, body) {
   return rowToComment(db.prepare('SELECT * FROM card_comments WHERE id = ?').get(commentId));
 }
 
-module.exports = { listForCard, add, update, rowToComment };
+function remove(db, cardId, commentId) {
+  const row = db.prepare('SELECT * FROM card_comments WHERE id = ? AND card_id = ?').get(commentId, cardId);
+  if (!row) throw new Error('comment not found');
+  const card = db.prepare('SELECT board_id FROM cards WHERE id = ?').get(cardId);
+  if (!card) throw new Error('card not found');
+  db.prepare('DELETE FROM card_comments WHERE id = ?').run(commentId);
+  events.insert(db, {
+    card_id: cardId,
+    board_id: card.board_id,
+    event_type: 'comment_removed',
+    payload: { comment_id: commentId },
+  });
+  return { removed: true };
+}
+
+module.exports = { listForCard, add, update, remove, rowToComment };

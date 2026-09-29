@@ -2702,6 +2702,34 @@ button[disabled] { opacity: .4; pointer-events: none; }
   margin-bottom: 5px;
   min-width: 0;
 }
+.kuiper-card-head-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  margin-bottom: 5px;
+  min-width: 0;
+  /* Deja libre la esquina superior derecha (estrella / prioridad) */
+  padding-right: 30px;
+}
+.kuiper-card.has-pri .kuiper-card-head-row {
+  padding-right: 58px;
+}
+.kuiper-card-head-row .kuiper-card-id-wrap {
+  margin-bottom: 0;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+}
+.kuiper-card-head-row .kuiper-card-subtasks-badge {
+  margin-top: 0;
+  margin-left: 0;
+  flex: 0 0 auto;
+  order: 1;
+}
+.kuiper-card-head-row .kuiper-card-id-wrap {
+  order: 0;
+}
 .kuiper-issue-type {
   flex: none;
   display: inline-flex;
@@ -2755,6 +2783,7 @@ button[disabled] { opacity: .4; pointer-events: none; }
 }
 .kuiper-card-id-ico svg { width: 12px; height: 12px; }
 .kuiper-card.has-pri .kuiper-card-id-wrap { padding-right: 18px; }
+.kuiper-card.has-pri .kuiper-card-head-row .kuiper-card-id-wrap { padding-right: 0; }
 .kuiper-ctrl {
   position: relative;
   flex: none;
@@ -3010,10 +3039,39 @@ html[data-kuiper="1"] .board:not(.kuiper-swimlanes) > .col:not(.ghost-col) {
 }
 .kuiper-card h3 {
   display: block;
-  padding-right: 10px;
+  padding-right: 30px;
   line-height: 1.35;
 }
-.kuiper-card.has-pri h3 { padding-right: 26px; }
+.kuiper-card.has-pri h3 { padding-right: 58px; }
+.kuiper-card-subtasks-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  padding: 3px 8px 3px 6px;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--line-hi) 85%, var(--accent-fill, #e07a2f) 15%);
+  background: color-mix(in srgb, var(--raise) 88%, var(--surface));
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--line) 40%, transparent);
+  font: 600 12px/1.2 var(--mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  letter-spacing: 0.02em;
+}
+.kuiper-card-subtasks-badge.is-complete {
+  border-color: color-mix(in srgb, #7FD1AE 45%, var(--line));
+  background: color-mix(in srgb, #7FD1AE 14%, var(--raise));
+  color: color-mix(in srgb, #7FD1AE 55%, var(--text));
+}
+.kuiper-card-subtasks-mark {
+  display: grid;
+  place-items: center;
+  line-height: 0;
+  opacity: 0.95;
+}
+.kuiper-card-subtasks-count {
+  min-width: 2ch;
+}
 .kuiper-card .note {
   margin-top: 6px;
   -webkit-line-clamp: 2;
@@ -3602,12 +3660,9 @@ html[data-kuiper="1"] .board:not(.kuiper-swimlanes) > .col:not(.ghost-col) {
   opacity: 0.72;
   cursor: default;
 }
-.kuiper-card-subtasks {
+[data-density="compact"] .kuiper-card-subtasks-badge {
+  padding: 2px 6px 2px 5px;
   font-size: 11px;
-  font-weight: 600;
-  color: var(--faint);
-  margin-bottom: 4px;
-  font-variant-numeric: tabular-nums;
 }
 .kuiper-editor-grid {
   display: grid;

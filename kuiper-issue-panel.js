@@ -1004,6 +1004,35 @@ const KuiperIssuePanel = (() => {
     if (btn.dataset.commentAct === 'save') {
       e.preventDefault();
       saveCommentEdit(commentId, item);
+      return;
+    }
+    if (btn.dataset.commentAct === 'delete') {
+      removeComment(commentId);
+    }
+  }
+
+  async function removeComment(commentId) {
+    if (!currentCardId || currentCardId === 'new') return;
+    const C = typeof KuiperConfirm !== 'undefined' ? KuiperConfirm : null;
+    let ok = true;
+    if (C) {
+      ok = await C.confirmArchive({
+        title: tr('deleteComment'),
+        message: tr('deleteComment'),
+        confirmLabel: tr('delete'),
+        cancelLabel: tr('cancel'),
+      });
+    } else {
+      ok = window.confirm(tr('deleteComment'));
+    }
+    if (!ok) return;
+    try {
+      await KuiperStore.deleteComment(currentCardId, commentId);
+      if (editingCommentId === commentId) editingCommentId = null;
+      await reloadDetail();
+    } catch (err) {
+      console.warn('comment delete failed', err);
+      ctx.toast?.(tr('saveFailed'), null, undefined, 'error');
     }
   }
 
@@ -1623,6 +1652,7 @@ const KuiperIssuePanel = (() => {
       case 'tags_changed': return tr('histTagsChanged', { value: (p.tags || []).join(', ') });
       case 'comment_added': return tr('histCommentAdded');
       case 'comment_updated': return tr('histCommentUpdated');
+      case 'comment_removed': return tr('histCommentRemoved');
       case 'time_logged': return tr('histTimeLogged', { value: formatMinutes(p.duration_minutes) });
       case 'time_updated': return tr('histTimeUpdated', { value: formatMinutes(p.duration_minutes) });
       case 'time_removed': return tr('histTimeRemoved', { value: formatMinutes(p.duration_minutes) });
@@ -1668,7 +1698,10 @@ const KuiperIssuePanel = (() => {
       <article class="kuiper-comment-item" data-comment-id="${esc(c.id)}">
         <div class="kuiper-comment-head">
           <time>${esc(formatWhen(c.created_at))}</time>
-          <button type="button" class="icon sm kuiper-comment-edit" data-comment-act="edit" title="${esc(tr('editComment'))}" aria-label="${esc(tr('editComment'))}">${EDIT_ICON}</button>
+          <span class="kuiper-comment-actions">
+            <button type="button" class="icon sm kuiper-comment-edit" data-comment-act="edit" title="${esc(tr('editComment'))}" aria-label="${esc(tr('editComment'))}">${EDIT_ICON}</button>
+            <button type="button" class="icon sm danger" data-comment-act="delete" title="${esc(tr('deleteComment'))}" aria-label="${esc(tr('deleteComment'))}">×</button>
+          </span>
         </div>
         <div class="kuiper-md kuiper-comment-body">${renderMd(c.body)}</div>
       </article>`;

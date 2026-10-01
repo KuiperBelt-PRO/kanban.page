@@ -1411,15 +1411,90 @@ const BoardCore = (() => {
     return datesOverlap(start, end, viewStart, viewEnd);
   }
 
+  /** Número en nombres tipo Jira «Sprint 42». */
+  function sprintNumberFromName(name) {
+    const m = String(name || '').trim().match(/^Sprint\s+(\d+)\s*$/i);
+    return m ? parseInt(m[1], 10) : null;
+  }
+
+  /** Siguiente nombre por defecto (Sprint 1, Sprint 2, …). */
+  function nextDefaultSprintName(sprints) {
+    let max = 0;
+    for (const s of sprints || []) {
+      const n = sprintNumberFromName(s.name);
+      if (n != null && n > max) max = n;
+    }
+    return `Sprint ${max + 1}`;
+  }
+
+  /** Ventana de 14 días tras el fin del sprint abierto (activo/inactivo) más lejano; excluye cerrados y archivados. */
+  function sprintEligibleForDateChain(s) {
+    if (!s) return false;
+    if (s.archived === true || s.archived === 1) return false;
+    const status = s.status === 'planned' ? 'inactive' : (s.status || 'inactive');
+    return status !== 'closed';
+  }
+
+  function suggestNextSprintDates(sprints) {
+    let lastEnd = null;
+    for (const s of sprints || []) {
+      if (!sprintEligibleForDateChain(s)) continue;
+      const end = s.endDate || s.end_date;
+      if (end && isScheduleYmd(end) && (!lastEnd || end > lastEnd)) lastEnd = end;
+    }
+    if (lastEnd) {
+      const start_date = addDays(lastEnd, 1);
+      return { start_date, end_date: addDays(start_date, 13) };
+    }
+    const start_date = ymd();
+    return { start_date, end_date: addDays(start_date, 13) };
+  }
+
   function sortSprintsForUi(list) {
+    return sortSprintsForAdmin(list, 'board');
+  }
+
+  /** Orden del listado Manage → Sprints (`mode` distinto de `board` = tablero). */
+  function sortSprintsForAdmin(list, mode) {
     const copy = [...(list || [])];
+    const nameOf = s => (s.name || '').toLocaleLowerCase();
+    const slugOf = s => (s.slug || '').toLocaleLowerCase();
+    const startOf = s => s.startDate || s.start_date || '';
+    const endOf = s => s.end_date || s.endDate || '';
+    const statusRank = s => {
+      if (s.status === 'active') return 0;
+      if (s.status === 'closed') return 2;
+      return 1;
+    };
+    const cmpStr = (a, b) => (a || '').localeCompare(b || '');
     copy.sort((a, b) => {
-      const aActive = a.status === 'active' ? 1 : 0;
-      const bActive = b.status === 'active' ? 1 : 0;
-      if (bActive !== aActive) return bActive - aActive;
-      const as = a.startDate || a.start_date || '';
-      const bs = b.startDate || b.start_date || '';
-      return bs.localeCompare(as) || (a.name || '').localeCompare(b.name || '');
+      switch (mode) {
+        case 'name':
+          return nameOf(a).localeCompare(nameOf(b)) || cmpStr(slugOf(a), slugOf(b));
+        case 'nameDesc':
+          return nameOf(b).localeCompare(nameOf(a)) || cmpStr(slugOf(b), slugOf(a));
+        case 'slug':
+          return cmpStr(slugOf(a), slugOf(b)) || nameOf(a).localeCompare(nameOf(b));
+        case 'slugDesc':
+          return cmpStr(slugOf(b), slugOf(a)) || nameOf(b).localeCompare(nameOf(a));
+        case 'start':
+          return cmpStr(startOf(a), startOf(b)) || nameOf(a).localeCompare(nameOf(b));
+        case 'startDesc':
+          return cmpStr(startOf(b), startOf(a)) || nameOf(a).localeCompare(nameOf(b));
+        case 'end':
+          return cmpStr(endOf(a), endOf(b)) || cmpStr(startOf(a), startOf(b));
+        case 'endDesc':
+          return cmpStr(endOf(b), endOf(a)) || cmpStr(startOf(b), startOf(a));
+        case 'status':
+          return statusRank(a) - statusRank(b) || cmpStr(startOf(b), startOf(a)) || nameOf(a).localeCompare(nameOf(b));
+        case 'board':
+        default: {
+          const aActive = a.status === 'active' ? 1 : 0;
+          const bActive = b.status === 'active' ? 1 : 0;
+          if (bActive !== aActive) return bActive - aActive;
+          return cmpStr(startOf(b), startOf(a)) || nameOf(a).localeCompare(nameOf(b));
+        }
+      }
     });
     return copy;
   }
@@ -1492,7 +1567,8 @@ const BoardCore = (() => {
     buildBlockingGraph, blockingSuccessors, detectBlockingCycle,
     scheduleDayDelta, minDeltaForFinishToStart, cascadeScheduleMove, cascadeEndResize, cascadeAfterResizeEnd,
     daysBetweenInclusive, compareYmd,
-    datesOverlap, sprintOverlapsRange, sortSprintsForUi,
+    datesOverlap, sprintOverlapsRange, sortSprintsForUi, sortSprintsForAdmin,
+    sprintNumberFromName, nextDefaultSprintName, suggestNextSprintDates, sprintEligibleForDateChain,
     ISSUE_TYPES, DEFAULT_ISSUE_TYPE, normalizeIssueType,
     issueTypeAllowsEpicLink, issueTypeAllowsParent, issueTypeIsEpic,
     isSubtask, isBoardTopLevelTask, sortedStages, firstStageId, terminalStageId, subtaskIsDone,

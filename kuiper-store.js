@@ -334,8 +334,9 @@ const KuiperStore = (() => {
     return request(`/api/v1/tags/${encodeURIComponent(id)}`, { method: 'DELETE' });
   }
 
-  async function listOrgSprints(orgSlug) {
-    const data = await request(`/api/v1/organizations/${encodeURIComponent(orgSlug)}/sprints`);
+  async function listOrgSprints(orgSlug, { includeArchived = false } = {}) {
+    const q = includeArchived ? '?include_archived=1' : '';
+    const data = await request(`/api/v1/organizations/${encodeURIComponent(orgSlug)}/sprints${q}`);
     return data.sprints || [];
   }
 

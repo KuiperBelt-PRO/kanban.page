@@ -1,6 +1,6 @@
 'use strict';
 
-const { entityId } = require('../../ids.js');
+const { entityId, suggestProjectCode } = require('../../ids.js');
 const { nowIso, slugify } = require('../../util.js');
 const { DEFAULT_STAGES } = require('../../config.js');
 const orgs = require('./organizations.js');
@@ -21,6 +21,22 @@ function getVersion(db, boardId) {
   return row ? row.version : 0;
 }
 
+function allocateBoardCode(db, organizationId, slug, name, exceptId = null) {
+  let base = suggestProjectCode(slug, name);
+  let code = base;
+  let n = 1;
+  while (db.prepare(`
+    SELECT 1 AS n FROM boards
+    WHERE organization_id = ? AND code = ? AND (? IS NULL OR id != ?)
+  `).get(organizationId, code, exceptId, exceptId)) {
+    const suffix = String(n);
+    code = `${base.slice(0, Math.max(2, 4 - suffix.length))}${suffix}`.slice(0, 4);
+    n += 1;
+    if (n > 99) throw new Error('board code already in use');
+  }
+  return code;
+}
+
 function create(db, { organization_id, organization_slug, slug, name, project_ids = [] }) {
   let org = organization_id ? orgs.getById(db, organization_id) : null;
   if (!org && organization_slug) org = orgs.getBySlug(db, organization_slug);
@@ -29,10 +45,11 @@ function create(db, { organization_id, organization_slug, slug, name, project_id
   const id = entityId();
   const ts = nowIso();
   const finalSlug = slugify(slug || name);
+  const code = allocateBoardCode(db, org.id, finalSlug, name);
   db.prepare(`
-    INSERT INTO boards(id, organization_id, slug, name, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).run(id, org.id, finalSlug, name, ts, ts);
+    INSERT INTO boards(id, organization_id, slug, code, name, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(id, org.id, finalSlug, code, name, ts, ts);
 
   const stages = DEFAULT_STAGES.map((stageName, index) => {
     const stageId = entityId();
@@ -150,6 +167,7 @@ function getSnapshot(db, idOrSlug, resolveOpts) {
     board: {
       id: board.id,
       slug: board.slug,
+      code: board.code || null,
       name: board.name,
       organization_id: board.organization_id,
     },
@@ -176,6 +194,7 @@ function getSnapshot(db, idOrSlug, resolveOpts) {
     sprints: sprintRows.map(s => ({
       id: s.id,
       slug: s.slug,
+      code: s.code || null,
       name: s.name,
       goal: s.goal,
       start_date: s.start_date,
@@ -281,6 +300,7 @@ function getMembership(db, boardId) {
 }
 
 module.exports = {
+  allocateBoardCode,
   create,
   getById,
   getBySlug,

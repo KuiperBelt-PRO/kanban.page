@@ -1,16 +1,33 @@
 'use strict';
 
-const { entityId } = require('../../ids.js');
+const { entityId, suggestProjectCode } = require('../../ids.js');
 const { nowIso, slugify } = require('../../util.js');
+
+function allocateOrganizationCode(db, slug, name, exceptId = null) {
+  let base = suggestProjectCode(slug, name);
+  let code = base;
+  let n = 1;
+  while (db.prepare(`
+    SELECT 1 AS n FROM organizations
+    WHERE code = ? AND (? IS NULL OR id != ?)
+  `).get(code, exceptId, exceptId)) {
+    const suffix = String(n);
+    code = `${base.slice(0, Math.max(2, 4 - suffix.length))}${suffix}`.slice(0, 4);
+    n += 1;
+    if (n > 99) throw new Error('organization code already in use');
+  }
+  return code;
+}
 
 function create(db, { slug, name }) {
   const id = entityId();
   const ts = nowIso();
   const finalSlug = slugify(slug || name);
+  const code = allocateOrganizationCode(db, finalSlug, name);
   db.prepare(`
-    INSERT INTO organizations(id, slug, name, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?)
-  `).run(id, finalSlug, name, ts, ts);
+    INSERT INTO organizations(id, slug, code, name, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(id, finalSlug, code, name, ts, ts);
   return getById(db, id);
 }
 
@@ -50,4 +67,12 @@ function remove(db, slug) {
   return { removed: true };
 }
 
-module.exports = { create, getById, getBySlug, list, update, remove };
+module.exports = {
+  create,
+  getById,
+  getBySlug,
+  list,
+  update,
+  remove,
+  allocateOrganizationCode,
+};

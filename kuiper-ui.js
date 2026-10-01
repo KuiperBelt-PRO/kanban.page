@@ -1081,7 +1081,7 @@ const KuiperUI = (() => {
     const btnLabel = ctrl.querySelector('.kuiper-drop-label');
     const items = menu?.querySelector('.kuiper-drop-items');
     const header = menu?.querySelector('.menu-label');
-    if (header) header.textContent = tr(header.dataset.i18n);
+    if (header?.dataset.i18n) header.textContent = tr(header.dataset.i18n);
     if (!items || !btnLabel) return;
     items.innerHTML = '';
     let activeLabel = '';
@@ -3549,6 +3549,7 @@ const KuiperUI = (() => {
     renderRailControls,
     setSidebarOpen,
     toggleSprintFilter,
+    updateDropdown,
   };
 })();
 

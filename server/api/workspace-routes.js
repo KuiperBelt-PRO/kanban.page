@@ -71,7 +71,10 @@ async function handleWorkspaceRoutes(req, res, db, urlPath, method, { badRequest
   if (orgSprints && method === 'GET') {
     const org = orgs.getBySlug(db, decodeURIComponent(orgSprints[1]));
     if (!org) return notFound(res);
-    const rows = sprints.listByOrg(db, { organization_id: org.id }).map(s => sprints.attachProjects(db, s));
+    const q = new URL(req.url || '', 'http://localhost').searchParams;
+    const includeArchived = q.get('include_archived') === '1';
+    const rows = sprints.listByOrg(db, { organization_id: org.id, includeArchived })
+      .map(s => sprints.attachProjects(db, s));
     return sendJson(res, 200, { ok: true, data: { sprints: rows } });
   }
   if (orgSprints && method === 'POST') {

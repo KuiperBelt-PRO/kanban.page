@@ -1475,3 +1475,27 @@ test('subtaskIsDone uses last stage by order', () => {
   assert.equal(C.subtaskIsDone({ columnId: 'c' }, cols), true);
   assert.equal(C.subtaskIsDone({ columnId: 'a' }, cols), false);
 });
+
+test('nextDefaultSprintName follows Jira-style numbering', () => {
+  assert.equal(C.nextDefaultSprintName([]), 'Sprint 1');
+  assert.equal(C.nextDefaultSprintName([{ name: 'Sprint 3' }, { name: 'Sprint 1' }]), 'Sprint 4');
+  assert.equal(C.nextDefaultSprintName([{ name: 'Release Q1' }]), 'Sprint 1');
+});
+
+test('suggestNextSprintDates chains after open sprint with latest end', () => {
+  const chained = C.suggestNextSprintDates([
+    { start_date: '2026-03-01', end_date: '2026-03-14', status: 'closed' },
+    { start_date: '2026-04-01', end_date: '2026-04-14', status: 'inactive', archived: 0 },
+    { start_date: '2026-02-01', end_date: '2026-02-14', status: 'active', archived: 0 },
+  ]);
+  assert.equal(chained.start_date, '2026-04-15');
+  assert.equal(chained.end_date, '2026-04-28');
+});
+
+test('suggestNextSprintDates ignores closed and archived for chaining', () => {
+  const chained = C.suggestNextSprintDates([
+    { end_date: '2026-06-01', status: 'closed', archived: 0 },
+    { end_date: '2026-07-01', status: 'inactive', archived: 1 },
+  ]);
+  assert.ok(chained.start_date >= C.ymd());
+});

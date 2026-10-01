@@ -1,6 +1,7 @@
 'use strict';
 
 const orgs = require('./db/repositories/organizations.js');
+const sprints = require('./db/repositories/sprints.js');
 const { colorByName } = require('./entity-colors.js');
 
 /** Map Kuiper board snapshot → upstream kanban.page state shape. */
@@ -53,11 +54,12 @@ function snapshotToState(snapshot) {
   const sprintsList = (snapshot.sprints || []).map((s, index) => ({
     id: s.id,
     slug: s.slug,
+    code: s.code || null,
     name: s.name,
     goal: s.goal || null,
     startDate: s.start_date,
     endDate: s.end_date,
-    status: s.status || 'planned',
+    status: sprints.normalizeSprintStatus(s.status),
     projectIds: s.project_ids || [],
     color: ENTITY_COLORS[(index + 3) % ENTITY_COLORS.length],
     mt: now,

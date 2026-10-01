@@ -799,11 +799,13 @@ const KuiperWorkspaceAdmin = (() => {
       slugAttr: 'board-slug',
       slug: b.slug,
     });
-    return `<li class="${classes}${isArchived ? ' is-archived-entity' : ''}" data-board-id="${esc(b.id)}" data-board-slug="${esc(b.slug)}" data-board-name="${esc(b.name)}">
-      <button type="button" class="kuiper-ws-board-select" data-board-slug="${esc(b.slug)}" data-board-id="${esc(b.id)}">
-        <span class="kuiper-ws-board-label">${isSelected ? `<strong>${esc(b.name)}</strong>` : esc(b.name)}</span>
-        <span class="faint"> · ${esc(b.slug)}</span>
-      </button>
+    return `<li class="${classes} kuiper-ws-catalog-row${isArchived ? ' is-archived-entity' : ''}" data-board-id="${esc(b.id)}" data-board-slug="${esc(b.slug)}" data-board-name="${esc(b.name)}" data-entity-name="${esc(b.name)}">
+      <div class="kuiper-ws-board-select kuiper-ws-catalog-select kuiper-ws-board-select-main" data-board-slug="${esc(b.slug)}" data-board-id="${esc(b.id)}">
+        <span class="kuiper-ws-catalog-name-wrap">
+          <input type="text" class="kuiper-ws-input kuiper-ws-catalog-name kuiper-ws-board-name" data-board-id="${esc(b.id)}" value="${esc(b.name)}" autocomplete="off" spellcheck="false">
+          <span class="faint kuiper-ws-catalog-meta"> · ${esc(b.slug)}</span>
+        </span>
+      </div>
       <div class="kuiper-ws-board-row-actions">
         ${archBadge}
         ${currentBadge}
@@ -825,10 +827,10 @@ const KuiperWorkspaceAdmin = (() => {
       row.classList.toggle('kuiper-ws-board-row--muted', muted);
       row.classList.toggle('kuiper-ws-board-row--current', isCurrent);
       row.classList.toggle('is-selected', isSelected);
-      const label = row.querySelector('.kuiper-ws-board-label');
-      if (label) {
+      const nameInp = row.querySelector('.kuiper-ws-board-name');
+      if (nameInp && document.activeElement !== nameInp) {
         const name = row.dataset.boardName || slug;
-        label.innerHTML = isSelected ? `<strong>${esc(name)}</strong>` : esc(name);
+        if (nameInp.value !== name) nameInp.value = name;
       }
       let badge = row.querySelector('.kuiper-ws-board-current');
       const actions = row.querySelector('.kuiper-ws-board-row-actions');
@@ -841,19 +843,55 @@ const KuiperWorkspaceAdmin = (() => {
     });
   }
 
+  function boardNameFromRow(row) {
+    return row?.querySelector('.kuiper-ws-board-name')?.value.trim()
+      || row?.dataset.boardName
+      || row?.dataset.boardSlug
+      || '';
+  }
+
+  function bindBoardNameInputs(root) {
+    root.querySelectorAll('input.kuiper-ws-board-name').forEach(inp => {
+      inp.addEventListener('change', async () => {
+        const row = inp.closest('.kuiper-ws-board-row');
+        const slug = row?.dataset.boardSlug;
+        const prev = row?.dataset.boardName || '';
+        const name = inp.value.trim();
+        if (!name) {
+          inp.value = prev;
+          return;
+        }
+        if (name === prev) return;
+        const apiKey = inp.dataset.boardId || row?.dataset.boardId || boardApiKey(slug);
+        try {
+          await KuiperStore.patchBoard(apiKey, { name }, boardStoreOpts());
+          row.dataset.boardName = name;
+          row.dataset.entityName = name;
+          await afterBoardDetailMutation(slug);
+        } catch (err) {
+          inp.value = prev;
+          ctx.toast?.(err.message, null, 8000, 'error');
+        }
+      });
+    });
+  }
+
   function wireBoardListHandlers(root) {
-    root.querySelectorAll('.kuiper-ws-board-select').forEach(btn => {
-      btn.onclick = () => {
-        selectedBoardSlug = btn.dataset.boardSlug;
-        selectedBoardId = btn.dataset.boardId || btn.closest('.kuiper-ws-board-row')?.dataset.boardId || null;
+    wireCatalogRowActionFocus(root);
+    bindBoardNameInputs(root);
+    root.querySelectorAll('.kuiper-ws-board-select-main').forEach(zone => {
+      zone.addEventListener('click', e => {
+        if (e.target.closest('input.kuiper-ws-board-name')) return;
+        selectedBoardSlug = zone.dataset.boardSlug;
+        selectedBoardId = zone.dataset.boardId || zone.closest('.kuiper-ws-board-row')?.dataset.boardId || null;
         withPreservedScroll(async () => {
           syncBoardListSelection();
-          const row = btn.closest('.kuiper-ws-board-row');
-          const metaName = row?.dataset.boardName || '';
+          const row = zone.closest('.kuiper-ws-board-row');
+          const metaName = boardNameFromRow(row);
           const host = root.querySelector('#kuiperWsBoardDetail');
           if (host) await fillBoardDetail(host, selectedBoardSlug, metaName);
         });
-      };
+      });
     });
     root.querySelectorAll('[data-act="open-board"]').forEach(btn => {
       btn.onclick = () => {
@@ -866,7 +904,7 @@ const KuiperWorkspaceAdmin = (() => {
         const slug = btn.dataset.boardSlug;
         const row = btn.closest('.kuiper-ws-board-row');
         const apiKey = row?.dataset.boardId || boardApiKey(slug);
-        const name = row?.dataset.boardName || slug;
+        const name = boardNameFromRow(row) || slug;
         if (!await confirmArchiveEntity(name)) return;
         try {
           await KuiperStore.patchBoard(apiKey, { archived: true }, boardStoreOpts());
@@ -898,7 +936,7 @@ const KuiperWorkspaceAdmin = (() => {
         const slug = btn.dataset.boardSlug;
         const row = btn.closest('.kuiper-ws-board-row');
         const apiKey = row?.dataset.boardId || boardApiKey(slug);
-        const name = row?.dataset.boardName || slug;
+        const name = boardNameFromRow(row) || slug;
         if (!await confirmDeleteEntity(name)) return;
         try {
           await KuiperStore.deleteBoard(apiKey, boardStoreOpts());
@@ -1010,7 +1048,7 @@ const KuiperWorkspaceAdmin = (() => {
       const host = body.querySelector('#kuiperWsBoardDetail');
       if (!host || !selectedBoardSlug) return;
       const row = body.querySelector(`.kuiper-ws-board-row[data-board-slug="${CSS.escape(selectedBoardSlug)}"]`);
-      const metaName = row?.dataset.boardName || '';
+      const metaName = boardNameFromRow(row);
       await fillBoardDetail(host, selectedBoardSlug, metaName);
     });
   }
@@ -1085,16 +1123,9 @@ const KuiperWorkspaceAdmin = (() => {
     }
     const orgProjects = await KuiperStore.listOrgProjects(managedOrgSlug || orgSlug()).catch(() => []);
     const linked = new Set((membership.projects || []).map(p => p.id));
-    const boardName = isCurrent
-      ? (st?._kuiper?.boardName || fallbackName)
-      : fallbackName;
     hostEl.innerHTML = `
       <section class="kuiper-ws-section kuiper-ws-section--compact kuiper-ws-board-detail">
         <div class="menu-label">${esc(tr('workspaceAdminBoardDetail'))} · <span class="faint">${esc(slug)}</span></div>
-        <div class="kuiper-ws-row">
-          <input type="text" class="kuiper-ws-input" id="kuiperWsBoardName" value="${esc(boardName)}">
-          <button type="button" class="pill sm" data-act="save-board-name">${esc(tr('save'))}</button>
-        </div>
       </section>
       <div class="kuiper-ws-board-columns">
         <section class="kuiper-ws-board-col kuiper-ws-section kuiper-ws-section--compact kuiper-ws-projects-compact">
@@ -1160,12 +1191,6 @@ const KuiperWorkspaceAdmin = (() => {
         }
       };
     }
-    hostEl.querySelector('[data-act="save-board-name"]').onclick = async () => {
-      const name = hostEl.querySelector('#kuiperWsBoardName').value.trim();
-      if (!name) return;
-      await KuiperStore.patchBoard(apiKey, { name }, bOpts);
-      await afterBoardDetailMutation(slug);
-    };
     const projEl = hostEl.querySelector('#kuiperWsBoardProjects');
     for (const p of orgProjects) {
       const li = document.createElement('li');

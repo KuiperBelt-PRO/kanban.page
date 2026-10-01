@@ -2028,6 +2028,15 @@ button[disabled] { opacity: .4; pointer-events: none; }
   cursor: pointer;
 }
 .kuiper-ws-board-select .faint { font-size: 11px; }
+.kuiper-ws-board-row .kuiper-ws-board-select-main {
+  cursor: pointer;
+}
+.kuiper-ws-board-row .kuiper-ws-board-select-main .kuiper-ws-board-name {
+  cursor: text;
+}
+.kuiper-ws-board-row.is-selected .kuiper-ws-catalog-name {
+  font-weight: 600;
+}
 .kuiper-ws-board-row-actions {
   display: flex;
   align-items: center;

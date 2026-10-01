@@ -207,9 +207,15 @@ const KuiperStore = (() => {
     return data.impact;
   }
 
-  async function listOrgTags(orgSlug) {
-    const data = await request(`/api/v1/organizations/${encodeURIComponent(orgSlug)}/tags`);
+  async function listOrgTags(orgSlug, { includeArchived = false } = {}) {
+    const q = includeArchived ? '?include_archived=1' : '';
+    const data = await request(`/api/v1/organizations/${encodeURIComponent(orgSlug)}/tags${q}`);
     return data.tags || [];
+  }
+
+  async function tagDeletionImpact(id) {
+    const data = await request(`/api/v1/tags/${encodeURIComponent(id)}/deletion-impact`);
+    return data.impact;
   }
 
   async function createOrgTag(orgSlug, name) {
@@ -313,9 +319,13 @@ const KuiperStore = (() => {
   }
 
   async function renameTag(id, name) {
+    return patchTag(id, { name });
+  }
+
+  async function patchTag(id, body) {
     const data = await request(`/api/v1/tags/${encodeURIComponent(id)}`, {
       method: 'PATCH',
-      body: JSON.stringify({ name }),
+      body: JSON.stringify(body),
     });
     return data.tag;
   }
@@ -383,9 +393,11 @@ const KuiperStore = (() => {
     deleteEpic,
     listBoardTags,
     listOrgTags,
+    tagDeletionImpact,
     createBoardTag,
     createOrgTag,
     renameTag,
+    patchTag,
     deleteTag,
     listOrgSprints,
     createOrgSprint,

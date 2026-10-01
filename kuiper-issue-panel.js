@@ -38,6 +38,8 @@ const KuiperIssuePanel = (() => {
   }
 
   function tagColor(name) {
+    const fromChip = (detail?.tags || []).find(t => t.name === name);
+    if (fromChip?.color) return fromChip.color;
     return ctx.tagColor?.(name) || (() => {
       const s = String(name || '');
       let h = 0;
@@ -127,7 +129,16 @@ const KuiperIssuePanel = (() => {
       label: detail.activeTimer.label || '',
     } : null;
     if (st?._kuiper) {
-      st._kuiper.boardTags = (detail.boardTags || []).map(x => x.name);
+      const raw = detail.boardTags || [];
+      st._kuiper.boardTags = raw.map(x => (
+        typeof x === 'string'
+          ? { name: x, color: st._kuiper.tagColors?.[x] || null }
+          : { name: x.name, color: x.color || st._kuiper.tagColors?.[x.name] || null }
+      ));
+      st._kuiper.tagColors = st._kuiper.tagColors || {};
+      for (const t of st._kuiper.boardTags) {
+        if (t.name && t.color) st._kuiper.tagColors[t.name] = t.color;
+      }
     }
   }
 
@@ -541,9 +552,14 @@ const KuiperIssuePanel = (() => {
     return partial?.id || null;
   }
 
+  function normalizeTagNameLocal(raw) {
+    return String(raw || '').trim().toUpperCase().replace(/[^A-Z0-9_]/g, '');
+  }
+
   async function persistTags(names) {
     if (!currentCardId || currentCardId === 'new') return;
-    await KuiperStore.patchCard(currentCardId, { tags: names });
+    const normalized = [...new Set((names || []).map(normalizeTagNameLocal).filter(Boolean))];
+    await KuiperStore.patchCard(currentCardId, { tags: normalized });
     await reloadDetail();
     ctx.refreshBoard?.();
   }
@@ -672,7 +688,7 @@ const KuiperIssuePanel = (() => {
     if (e.key !== 'Enter' && e.key !== ',') return;
     e.preventDefault();
     const input = e.target;
-    const name = input.value.replace(/,/g, '').trim();
+    const name = normalizeTagNameLocal(input.value.replace(/,/g, ''));
     if (!name) return;
     addTagName(name);
     input.value = '';
@@ -840,7 +856,9 @@ const KuiperIssuePanel = (() => {
     const input = document.getElementById('kuiperTagInput');
     const box = document.getElementById('kuiperTagSuggest');
     if (!input || !box) return;
-    const q = input.value.replace(/,/g, '').trim().toLowerCase();
+    const normalized = normalizeTagNameLocal(input.value.replace(/,/g, ''));
+    if (input.value !== normalized) input.value = normalized;
+    const q = normalized.toLowerCase();
     const current = (detail?.tags || []).map(t => t.name);
     const matches = boardTagNames()
       .filter(n => !current.includes(n))

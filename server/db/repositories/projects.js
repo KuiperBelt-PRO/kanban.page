@@ -3,6 +3,7 @@
 const { entityId, normalizeProjectCode } = require('../../ids.js');
 const { allocateProjectCode } = require('../backfill-003.js');
 const { nowIso, slugify } = require('../../util.js');
+const { colorByIndex, normalizeHexColor } = require('../../entity-colors.js');
 const orgs = require('./organizations.js');
 
 function create(db, { organization_id, organization_slug, slug, name, description, code }) {
@@ -15,10 +16,12 @@ function create(db, { organization_id, organization_slug, slug, name, descriptio
   const finalCode = code
     ? normalizeProjectCode(code)
     : allocateProjectCode(db, org.id, finalSlug, name);
+  const n = db.prepare('SELECT COUNT(*) AS c FROM projects WHERE organization_id = ?').get(org.id).c;
+  const color = colorByIndex(n);
   db.prepare(`
-    INSERT INTO projects(id, organization_id, slug, name, description, code, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(id, org.id, finalSlug, name, description || null, finalCode, ts, ts);
+    INSERT INTO projects(id, organization_id, slug, name, description, code, color, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(id, org.id, finalSlug, name, description || null, finalCode, color, ts, ts);
   return getById(db, id);
 }
 
@@ -91,7 +94,12 @@ function update(db, id, fields) {
   if (!project) throw new Error('project not found');
   const name = fields.name != null ? fields.name : project.name;
   const description = fields.description !== undefined ? fields.description : project.description;
-  const color = fields.color !== undefined ? fields.color : project.color;
+  let color = project.color;
+  if (fields.color !== undefined && fields.color != null && fields.color !== '') {
+    const next = normalizeHexColor(fields.color);
+    if (!next) throw new Error('invalid project color');
+    color = next;
+  }
   const archived = fields.archived != null ? (fields.archived ? 1 : 0) : project.archived;
   const ts = nowIso();
   db.prepare(`

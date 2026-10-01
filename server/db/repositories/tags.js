@@ -2,11 +2,17 @@
 
 const { entityId } = require('../../ids.js');
 const { nowIso } = require('../../util.js');
+const { colorByIndex, colorByName, normalizeHexColor } = require('../../entity-colors.js');
 const events = require('./events.js');
 const boards = require('./boards.js');
 
+function normalizeTagName(raw) {
+  return String(raw || '').trim().toUpperCase().replace(/[^A-Z0-9_]/g, '');
+}
+
+/** @deprecated use normalizeTagName — kept for card tag strings */
 function normalizeName(name) {
-  return String(name || '').trim().replace(/\s+/g, ' ');
+  return normalizeTagName(name);
 }
 
 function organizationIdForBoard(db, boardId) {
@@ -15,17 +21,32 @@ function organizationIdForBoard(db, boardId) {
   return board.organization_id;
 }
 
-function listByOrganization(db, organizationId) {
-  return db.prepare(`
-    SELECT * FROM tags WHERE organization_id = ?
-    ORDER BY name COLLATE NOCASE
-  `).all(organizationId);
+function listByOrganization(db, organizationId, { includeArchived = false } = {}) {
+  const sql = includeArchived
+    ? `SELECT * FROM tags WHERE organization_id = ? ORDER BY name COLLATE NOCASE`
+    : `SELECT * FROM tags WHERE organization_id = ? AND archived = 0 ORDER BY name COLLATE NOCASE`;
+  return db.prepare(sql).all(organizationId);
 }
 
-/** Tags for a board = all tags in the board's organization. */
+/** Tags for a board = active tags in the board's organization. */
 function listByBoard(db, boardId) {
   const orgId = organizationIdForBoard(db, boardId);
-  return listByOrganization(db, orgId);
+  return listByOrganization(db, orgId, { includeArchived: false });
+}
+
+function nextTagColor(db, organizationId, name) {
+  const n = db.prepare('SELECT COUNT(*) AS c FROM tags WHERE organization_id = ?').get(organizationId).c;
+  return colorByName(name) || colorByIndex(Number(n) + 2);
+}
+
+function insertTag(db, organizationId, name) {
+  const id = entityId();
+  const ts = nowIso();
+  const color = nextTagColor(db, organizationId, name);
+  db.prepare(`
+    INSERT INTO tags(id, organization_id, name, color, archived, created_at) VALUES (?, ?, ?, ?, 0, ?)
+  `).run(id, organizationId, name, color, ts);
+  return db.prepare('SELECT * FROM tags WHERE id = ?').get(id);
 }
 
 function findOrCreate(db, organizationId, rawName) {
@@ -34,13 +55,14 @@ function findOrCreate(db, organizationId, rawName) {
   const existing = db.prepare(`
     SELECT * FROM tags WHERE organization_id = ? AND name = ? COLLATE NOCASE
   `).get(organizationId, name);
-  if (existing) return existing;
-  const id = entityId();
-  const ts = nowIso();
-  db.prepare(`
-    INSERT INTO tags(id, organization_id, name, created_at) VALUES (?, ?, ?, ?)
-  `).run(id, organizationId, name, ts);
-  return db.prepare('SELECT * FROM tags WHERE id = ?').get(id);
+  if (existing) {
+    if (existing.archived) {
+      db.prepare('UPDATE tags SET archived = 0 WHERE id = ?').run(existing.id);
+      return getById(db, existing.id);
+    }
+    return existing;
+  }
+  return insertTag(db, organizationId, name);
 }
 
 function listForCard(db, cardId) {
@@ -74,7 +96,7 @@ function setForCard(db, cardId, boardId, rawNames, { emitEvent = true } = {}) {
 
 function mapForBoardCards(db, boardId) {
   const rows = db.prepare(`
-    SELECT ct.card_id, t.id, t.name
+    SELECT ct.card_id, t.id, t.name, t.color
     FROM card_tags ct
     JOIN tags t ON t.id = ct.tag_id
     JOIN cards c ON c.id = ct.card_id
@@ -84,24 +106,25 @@ function mapForBoardCards(db, boardId) {
   const map = new Map();
   for (const row of rows) {
     if (!map.has(row.card_id)) map.set(row.card_id, []);
-    map.get(row.card_id).push({ id: row.id, name: row.name });
+    map.get(row.card_id).push({ id: row.id, name: row.name, color: row.color || null });
   }
   return map;
 }
 
 function createForOrganization(db, organizationId, rawName) {
-  const name = normalizeName(rawName);
+  const name = normalizeTagName(rawName);
   if (!name) throw new Error('tag name required');
   const existing = db.prepare(`
     SELECT * FROM tags WHERE organization_id = ? AND name = ? COLLATE NOCASE
   `).get(organizationId, name);
-  if (existing) return existing;
-  const id = entityId();
-  const ts = nowIso();
-  db.prepare(`
-    INSERT INTO tags(id, organization_id, name, created_at) VALUES (?, ?, ?, ?)
-  `).run(id, organizationId, name, ts);
-  return db.prepare('SELECT * FROM tags WHERE id = ?').get(id);
+  if (existing) {
+    if (existing.archived) {
+      db.prepare('UPDATE tags SET archived = 0 WHERE id = ?').run(existing.id);
+      return getById(db, existing.id);
+    }
+    return existing;
+  }
+  return insertTag(db, organizationId, name);
 }
 
 function create(db, boardId, rawName) {
@@ -113,17 +136,33 @@ function getById(db, id) {
   return db.prepare('SELECT * FROM tags WHERE id = ?').get(id) || null;
 }
 
-function rename(db, id, rawName) {
+function update(db, id, fields) {
   const tag = getById(db, id);
   if (!tag) throw new Error('tag not found');
-  const name = normalizeName(rawName);
-  if (!name) throw new Error('tag name required');
-  const clash = db.prepare(`
-    SELECT id FROM tags WHERE organization_id = ? AND name = ? COLLATE NOCASE AND id != ?
-  `).get(tag.organization_id, name, id);
-  if (clash) throw new Error('tag name already exists');
-  db.prepare('UPDATE tags SET name = ? WHERE id = ?').run(name, id);
+  let name = tag.name;
+  if (Object.prototype.hasOwnProperty.call(fields, 'name')) {
+    name = normalizeTagName(fields.name);
+    if (!name) throw new Error('tag name required');
+    const clash = db.prepare(`
+      SELECT id FROM tags WHERE organization_id = ? AND name = ? COLLATE NOCASE AND id != ?
+    `).get(tag.organization_id, name, id);
+    if (clash) throw new Error('tag name already exists');
+  }
+  let color = tag.color;
+  if (fields.color !== undefined) {
+    const next = fields.color == null || fields.color === ''
+      ? nextTagColor(db, tag.organization_id, name)
+      : normalizeHexColor(fields.color);
+    if (fields.color != null && fields.color !== '' && !next) throw new Error('invalid tag color');
+    color = next;
+  }
+  const archived = fields.archived != null ? (fields.archived ? 1 : 0) : tag.archived;
+  db.prepare('UPDATE tags SET name = ?, color = ?, archived = ? WHERE id = ?').run(name, color, archived, id);
   return getById(db, id);
+}
+
+function rename(db, id, rawName) {
+  return update(db, id, { name: rawName });
 }
 
 function boardIdsUsingTag(db, tagId) {
@@ -133,6 +172,17 @@ function boardIdsUsingTag(db, tagId) {
     JOIN cards c ON c.id = ct.card_id
     WHERE ct.tag_id = ?
   `).all(tagId).map(r => r.board_id);
+}
+
+function deletionImpact(db, id) {
+  const tag = getById(db, id);
+  if (!tag) throw new Error('tag not found');
+  const cards = db.prepare('SELECT COUNT(*) AS c FROM card_tags WHERE tag_id = ?').get(id).c;
+  return {
+    tag_id: id,
+    tag_name: tag.name,
+    cards,
+  };
 }
 
 function remove(db, id) {
@@ -145,6 +195,7 @@ function remove(db, id) {
 }
 
 module.exports = {
+  normalizeTagName,
   normalizeName,
   listByOrganization,
   listByBoard,
@@ -156,6 +207,8 @@ module.exports = {
   createForOrganization,
   getById,
   rename,
+  update,
   remove,
+  deletionImpact,
   boardIdsUsingTag,
 };

@@ -4,6 +4,8 @@ const KuiperWorkspaceAdmin = (() => {
   let host = null;
   let tab = 'organizations';
   let showArchivedEntities = false;
+  let showArchivedProjects = false;
+  let showArchivedTags = false;
   let pendingTab = null;
   /** Tablero cuyo detalle (proyectos, etapas) se muestra en la pestaña unificada */
   let selectedBoardSlug = null;
@@ -14,7 +16,468 @@ const KuiperWorkspaceAdmin = (() => {
   function normalizeTab(next) {
     if (next === 'board') return 'boards';
     if (next === 'organization' || next === 'orgs') return 'organizations';
+    if (next === 'tags') return 'projects';
     return next || 'organizations';
+  }
+
+  const WS_TAB_PREF = 'workspaceAdminTab';
+
+  function readPersistedAdminTab() {
+    const raw = ctx.loadKuiperPrefs?.()?.[WS_TAB_PREF];
+    return raw ? normalizeTab(raw) : null;
+  }
+
+  function persistAdminTab(next) {
+    const t = normalizeTab(next);
+    if (!t || !ctx.saveKuiperPrefs) return;
+    ctx.saveKuiperPrefs({ ...ctx.loadKuiperPrefs?.(), [WS_TAB_PREF]: t });
+  }
+
+  function syncManagedContext() {
+    managedOrgSlug = orgSlug();
+    if (!selectedBoardSlug) selectedBoardSlug = boardSlug();
+    const st = ctx.state?.()._kuiper;
+    if (!selectedBoardId && selectedBoardSlug === boardSlug() && st?.boardId) {
+      selectedBoardId = st.boardId;
+    }
+  }
+
+  const WS_ENTITY_COLORS = [
+    '#FFB454', '#7FD1AE', '#8FB8FF', '#F58FA8', '#C79BFF', '#6FD3E8', '#D6C36B', '#9AA5B8',
+  ];
+
+  function wsColorByIndex(index) {
+    return WS_ENTITY_COLORS[((Number(index) || 0) % WS_ENTITY_COLORS.length + WS_ENTITY_COLORS.length) % WS_ENTITY_COLORS.length];
+  }
+
+  function wsColorByName(name) {
+    const s = String(name || '');
+    let h = 0;
+    for (let i = 0; i < s.length; i++) h = ((h << 5) - h) + s.charCodeAt(i);
+    return WS_ENTITY_COLORS[Math.abs(h) % WS_ENTITY_COLORS.length];
+  }
+
+  function wsEntityColor(stored, fallback) {
+    return stored || fallback;
+  }
+
+  function normalizeTagInput(raw) {
+    return String(raw || '').trim().toUpperCase().replace(/[^A-Z0-9_]/g, '');
+  }
+
+  function catalogEntityRowHtml({
+    kind,
+    id,
+    name,
+    slug,
+    color,
+    colorKind,
+    isArchived,
+    archiveAct,
+    restoreAct,
+    deleteAct,
+  }) {
+    const archBadge = isArchived
+      ? `<span class="kuiper-ws-archived-badge">${esc(tr('workspaceAdminArchivedBadge'))}</span>`
+      : '';
+    const actions = entityActionButtons({
+      archived: isArchived,
+      archiveAct,
+      restoreAct,
+      deleteAct,
+      slugAttr: `${kind}-id`,
+      slug: id,
+    });
+    const slugMeta = slug
+      ? `<span class="faint kuiper-ws-catalog-meta"> · ${esc(slug)}</span>`
+      : '';
+    const nameCls = kind === 'tag'
+      ? 'kuiper-ws-input kuiper-ws-catalog-name kuiper-ws-tag-name'
+      : 'kuiper-ws-input kuiper-ws-catalog-name';
+    const idAttr = kind === 'project' ? 'data-project-id' : 'data-tag-id';
+    return `<li class="kuiper-ws-board-row kuiper-ws-catalog-row${isArchived ? ' is-archived-entity' : ''}" ${idAttr}="${esc(id)}" data-entity-name="${esc(name)}">
+      <div class="kuiper-ws-board-select kuiper-ws-catalog-select">
+        ${wsColorPickerHtml(color, { kind: colorKind, id })}
+        <span class="kuiper-ws-catalog-name-wrap">
+          <input type="text" class="${nameCls}" value="${esc(name)}" ${idAttr}="${esc(id)}" autocomplete="off" spellcheck="false">
+          ${slugMeta}
+        </span>
+      </div>
+      <div class="kuiper-ws-board-row-actions">
+        ${archBadge}
+        ${actions}
+      </div>
+    </li>`;
+  }
+
+  function entityIdFromRow(btn, kind) {
+    const row = btn.closest('.kuiper-ws-catalog-row');
+    if (kind === 'project') return row?.dataset.projectId || btn.dataset.projectId;
+    return row?.dataset.tagId || btn.dataset.tagId;
+  }
+
+  function wireCatalogRowActionFocus(root) {
+    root.querySelectorAll('.kuiper-ws-entity-actions button').forEach(btn => {
+      btn.addEventListener('mousedown', e => { e.preventDefault(); });
+    });
+  }
+
+  function bindTagNameInputs(root, { onRenamed } = {}) {
+    root.querySelectorAll('.kuiper-ws-tag-name').forEach(inp => {
+      const initial = inp.value;
+      inp.addEventListener('input', () => {
+        const v = normalizeTagInput(inp.value);
+        if (inp.value !== v) inp.value = v;
+      });
+      inp.addEventListener('change', async () => {
+        const newName = normalizeTagInput(inp.value);
+        if (!newName) {
+          inp.value = initial;
+          ctx.toast?.(tr('workspaceAdminTagNameRequired'), null, 4000, 'warning');
+          return;
+        }
+        if (newName === normalizeTagInput(initial)) return;
+        try {
+          await KuiperStore.patchTag(inp.dataset.tagId, { name: newName });
+          inp.dataset.initialName = newName;
+          await onRenamed?.();
+        } catch (err) {
+          inp.value = initial;
+          ctx.toast?.(err.message, null, 8000, 'error');
+        }
+      });
+    });
+  }
+
+  function bindNewTagInput(input) {
+    if (!input) return;
+    input.addEventListener('input', () => {
+      const v = normalizeTagInput(input.value);
+      if (input.value !== v) input.value = v;
+    });
+    input.placeholder = tr('workspaceAdminNewTagPlaceholder');
+  }
+
+  const WS_COLOR_NAMES = ['Amber', 'Mint', 'Sky', 'Rose', 'Violet', 'Cyan', 'Gold', 'Slate'];
+
+  let wsColorDocClickBound = false;
+
+  function wsNormalizeHex(raw) {
+    const s = String(raw || '').trim();
+    if (/^#[0-9A-Fa-f]{6}$/.test(s)) return s.toUpperCase();
+    if (/^[0-9A-Fa-f]{6}$/.test(s)) return `#${s.toUpperCase()}`;
+    return null;
+  }
+
+  function wsHexToRgb(hex) {
+    const n = wsNormalizeHex(hex);
+    if (!n) return null;
+    const v = parseInt(n.slice(1), 16);
+    return { r: (v >> 16) & 255, g: (v >> 8) & 255, b: v & 255 };
+  }
+
+  function wsRgbToHex(r, g, b) {
+    const clamp = x => Math.min(255, Math.max(0, Math.round(x)));
+    return `#${[clamp(r), clamp(g), clamp(b)].map(x => x.toString(16).padStart(2, '0')).join('').toUpperCase()}`;
+  }
+
+  function wsRgbToHsv(r, g, b) {
+    const rn = r / 255;
+    const gn = g / 255;
+    const bn = b / 255;
+    const max = Math.max(rn, gn, bn);
+    const min = Math.min(rn, gn, bn);
+    const d = max - min;
+    let h = 0;
+    if (d !== 0) {
+      if (max === rn) h = ((gn - bn) / d + (gn < bn ? 6 : 0)) / 6;
+      else if (max === gn) h = ((bn - rn) / d + 2) / 6;
+      else h = ((rn - gn) / d + 4) / 6;
+    }
+    const s = max === 0 ? 0 : d / max;
+    return { h: h * 360, s, v: max };
+  }
+
+  function wsHsvToRgb(h, s, v) {
+    let hn = ((Number(h) % 360) + 360) % 360 / 360;
+    const i = Math.floor(hn * 6);
+    const f = hn * 6 - i;
+    const p = v * (1 - s);
+    const q = v * (1 - f * s);
+    const t = v * (1 - (1 - f) * s);
+    let r; let g; let b;
+    switch (i % 6) {
+      case 0: r = v; g = t; b = p; break;
+      case 1: r = q; g = v; b = p; break;
+      case 2: r = p; g = v; b = t; break;
+      case 3: r = p; g = q; b = v; break;
+      case 4: r = t; g = p; b = v; break;
+      default: r = v; g = p; b = q;
+    }
+    return { r: r * 255, g: g * 255, b: b * 255 };
+  }
+
+  function wsReadSvThumb(field) {
+    const thumb = field.querySelector('.kuiper-ws-color-sv-thumb');
+    if (!thumb) return { s: 1, v: 1 };
+    const s = Math.min(1, Math.max(0, parseFloat(thumb.dataset.s || '1')));
+    const v = Math.min(1, Math.max(0, parseFloat(thumb.dataset.v || '1')));
+    return { s, v };
+  }
+
+  function wsPlaceSvThumb(thumb, s, v) {
+    if (!thumb) return;
+    const ss = Math.min(1, Math.max(0, s));
+    const vv = Math.min(1, Math.max(0, v));
+    thumb.dataset.s = String(ss);
+    thumb.dataset.v = String(vv);
+    thumb.style.left = `${ss * 100}%`;
+    thumb.style.top = `${(1 - vv) * 100}%`;
+  }
+
+  function wsUpdateSvPlane(field, hue) {
+    const sv = field.querySelector('.kuiper-ws-color-sv');
+    if (!sv) return;
+    const h = Math.round(Number(hue) || 0);
+    sv.style.setProperty('--ws-hue', String(h));
+    sv.style.backgroundColor = `hsl(${h} 100% 50%)`;
+  }
+
+  function wsUpdateColorPickerFromHex(field, hex) {
+    const rgb = wsHexToRgb(hex);
+    if (!rgb) return;
+    const hsv = wsRgbToHsv(rgb.r, rgb.g, rgb.b);
+    const hueInp = field.querySelector('.kuiper-ws-color-hue');
+    if (hueInp) hueInp.value = String(Math.round(hsv.h));
+    wsUpdateSvPlane(field, hsv.h);
+    wsPlaceSvThumb(field.querySelector('.kuiper-ws-color-sv-thumb'), hsv.s, hsv.v);
+  }
+
+  function wsHexFromPicker(field) {
+    const hue = Number(field.querySelector('.kuiper-ws-color-hue')?.value || 0);
+    const { s, v } = wsReadSvThumb(field);
+    const rgb = wsHsvToRgb(hue, s, v);
+    return wsRgbToHex(rgb.r, rgb.g, rgb.b);
+  }
+
+  const WS_PALETTE_CHECK = '<svg class="kuiper-ws-palette-check" viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 6.3 5.1 8.8 9.6 3.4" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+  function closeAllWsColorPops(exceptField) {
+    document.querySelectorAll('.kuiper-ws-color-field').forEach(field => {
+      if (exceptField && field === exceptField) return;
+      const pop = field.querySelector('.kuiper-ws-color-pop');
+      const swatch = field.querySelector('.kuiper-ws-color-swatch');
+      if (pop) pop.hidden = true;
+      swatch?.setAttribute('aria-expanded', 'false');
+    });
+  }
+
+  function syncWsColorFieldUi(field, hex) {
+    const c = hex || field.dataset.current || '#9AA5B8';
+    field.dataset.current = c;
+    const swatch = field.querySelector('.kuiper-ws-color-swatch');
+    const wrap = field.querySelector('.kuiper-ws-color-swatch-wrap');
+    if (swatch) swatch.style.setProperty('--c', c);
+    if (wrap) wrap.style.setProperty('--c', c);
+    field.querySelectorAll('.kuiper-ws-palette-btn').forEach(btn => {
+      const pick = btn.dataset.pickColor || '';
+      btn.setAttribute('aria-pressed', pick.toUpperCase() === c.toUpperCase() ? 'true' : 'false');
+    });
+    const hexInp = field.querySelector('.kuiper-ws-color-hex');
+    if (hexInp) hexInp.value = c;
+    const previewHex = field.querySelector('.kuiper-ws-color-preview-hex');
+    if (previewHex) previewHex.textContent = c;
+    const previewSw = field.querySelector('.kuiper-ws-color-preview-swatch');
+    if (previewSw) previewSw.style.setProperty('--c', c);
+    const hueInp = field.querySelector('.kuiper-ws-color-hue');
+    if (hueInp) hueInp.style.setProperty('--c', c);
+    wsUpdateColorPickerFromHex(field, c);
+  }
+
+  function wsColorPickerHtml(hex, { kind, id }) {
+    const c = (hex || '#9AA5B8').toUpperCase();
+    const palette = WS_ENTITY_COLORS.map((col, i) => {
+      const pressed = col.toUpperCase() === c;
+      return `<button type="button" class="kuiper-ws-palette-btn" style="--c:${esc(col)}" data-pick-color="${esc(col)}" aria-pressed="${pressed ? 'true' : 'false'}" title="${esc(WS_COLOR_NAMES[i])}">${WS_PALETTE_CHECK}</button>`;
+    }).join('');
+    return `<div class="kuiper-ws-color-field" data-color-kind="${esc(kind)}" data-entity-id="${esc(id)}" data-current="${esc(c)}">
+      <span class="kuiper-ws-color-swatch-wrap" style="--c:${esc(c)}">
+        <button type="button" class="kuiper-ws-color-swatch" style="--c:${esc(c)}" aria-expanded="false" aria-haspopup="dialog" title="${esc(tr('workspaceAdminPickColor'))}"></button>
+      </span>
+      <div class="kuiper-ws-color-pop" hidden role="dialog" aria-label="${esc(tr('workspaceAdminPickColor'))}">
+        <div class="kuiper-ws-color-pop-head">
+          <span class="kuiper-ws-color-preview-swatch" style="--c:${esc(c)}" aria-hidden="true"></span>
+          <span class="kuiper-ws-color-preview-hex">${esc(c)}</span>
+        </div>
+        <div class="kuiper-ws-palette" role="listbox">${palette}</div>
+        <div class="kuiper-ws-color-picker-custom">
+          <div class="kuiper-ws-color-sv" role="application" aria-label="${esc(tr('workspaceAdminColorCustom'))}">
+            <span class="kuiper-ws-color-sv-thumb"></span>
+          </div>
+          <input type="range" class="kuiper-ws-color-hue" min="0" max="360" value="35" aria-label="${esc(tr('workspaceAdminColorHue'))}">
+        </div>
+        <div class="kuiper-ws-color-custom">
+          <input type="text" class="kuiper-ws-input kuiper-ws-color-hex" value="${esc(c)}" maxlength="7" spellcheck="false" autocomplete="off" aria-label="${esc(tr('workspaceAdminColorHex'))}">
+          <button type="button" class="pill sm" data-act="apply-custom-color">${esc(tr('save'))}</button>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  function ensureWsColorDocClose() {
+    if (wsColorDocClickBound) return;
+    wsColorDocClickBound = true;
+    document.addEventListener('click', e => {
+      if (e.target.closest('.kuiper-ws-color-field')) return;
+      closeAllWsColorPops();
+    });
+  }
+
+  let wsColorHandlers = null;
+  let wsColorRootClick = null;
+
+  function wireWsColorPickers(root, { onProjectColor, onTagColor }) {
+    wsColorHandlers = { onProjectColor, onTagColor };
+    ensureWsColorDocClose();
+    if (wsColorRootClick) root.removeEventListener('click', wsColorRootClick);
+    wsColorRootClick = async e => {
+      const apply = async (field, hex) => {
+        const next = wsNormalizeHex(hex);
+        if (!next) {
+          ctx.toast?.(tr('workspaceAdminColorInvalid'), null, 4000, 'warning');
+          return;
+        }
+        syncWsColorFieldUi(field, next);
+        const id = field.dataset.entityId;
+        try {
+          if (field.dataset.colorKind === 'project') await wsColorHandlers?.onProjectColor?.(id, next);
+          else if (field.dataset.colorKind === 'tag') await wsColorHandlers?.onTagColor?.(id, next);
+        } catch (err) {
+          ctx.toast?.(err.message, null, 8000, 'error');
+        }
+      };
+
+      const swatch = e.target.closest('.kuiper-ws-color-swatch');
+      if (swatch) {
+        e.stopPropagation();
+        const field = swatch.closest('.kuiper-ws-color-field');
+        const pop = field?.querySelector('.kuiper-ws-color-pop');
+        const open = pop && !pop.hidden;
+        closeAllWsColorPops();
+        if (pop && field && !open) {
+          pop.hidden = false;
+          swatch.setAttribute('aria-expanded', 'true');
+          wsUpdateColorPickerFromHex(field, field.dataset.current);
+          pop.querySelector('.kuiper-ws-color-hex')?.focus();
+        }
+        return;
+      }
+
+      const palBtn = e.target.closest('.kuiper-ws-palette-btn');
+      if (palBtn) {
+        e.stopPropagation();
+        const field = palBtn.closest('.kuiper-ws-color-field');
+        if (field) {
+          await apply(field, palBtn.dataset.pickColor);
+          closeAllWsColorPops();
+        }
+        return;
+      }
+
+      const applyBtn = e.target.closest('[data-act="apply-custom-color"]');
+      if (applyBtn) {
+        e.stopPropagation();
+        const field = applyBtn.closest('.kuiper-ws-color-field');
+        const hexInp = field?.querySelector('.kuiper-ws-color-hex');
+        if (field) {
+          await apply(field, hexInp?.value);
+          closeAllWsColorPops();
+        }
+      }
+    };
+    root.addEventListener('click', wsColorRootClick);
+
+    const previewHexOnly = (field, raw) => {
+      const next = wsNormalizeHex(raw);
+      if (next) syncWsColorFieldUi(field, next);
+    };
+
+    root.querySelectorAll('.kuiper-ws-color-hue').forEach(inp => {
+      inp.addEventListener('input', () => {
+        const field = inp.closest('.kuiper-ws-color-field');
+        if (!field) return;
+        wsUpdateSvPlane(field, inp.value);
+        const hex = wsHexFromPicker(field);
+        syncWsColorFieldUi(field, hex);
+      });
+    });
+
+    root.querySelectorAll('.kuiper-ws-color-sv').forEach(sv => {
+      const pickAt = (clientX, clientY) => {
+        const field = sv.closest('.kuiper-ws-color-field');
+        if (!field) return;
+        const rect = sv.getBoundingClientRect();
+        if (!rect.width || !rect.height) return;
+        const s = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+        const v = Math.min(1, Math.max(0, 1 - (clientY - rect.top) / rect.height));
+        wsPlaceSvThumb(sv.querySelector('.kuiper-ws-color-sv-thumb'), s, v);
+        syncWsColorFieldUi(field, wsHexFromPicker(field));
+      };
+      sv.addEventListener('pointerdown', e => {
+        if (e.button !== 0) return;
+        e.preventDefault();
+        sv.setPointerCapture(e.pointerId);
+        pickAt(e.clientX, e.clientY);
+      });
+      sv.addEventListener('pointermove', e => {
+        if (!sv.hasPointerCapture(e.pointerId)) return;
+        pickAt(e.clientX, e.clientY);
+      });
+      sv.addEventListener('pointerup', e => {
+        if (sv.hasPointerCapture(e.pointerId)) sv.releasePointerCapture(e.pointerId);
+      });
+    });
+
+    root.querySelectorAll('.kuiper-ws-color-hex').forEach(inp => {
+      inp.addEventListener('input', () => {
+        const field = inp.closest('.kuiper-ws-color-field');
+        if (field) previewHexOnly(field, inp.value);
+      });
+      inp.onkeydown = async ev => {
+        if (ev.key === 'Enter') {
+          ev.preventDefault();
+          const field = inp.closest('.kuiper-ws-color-field');
+          if (!field) return;
+          const next = wsNormalizeHex(inp.value);
+          if (!next) {
+            ctx.toast?.(tr('workspaceAdminColorInvalid'), null, 4000, 'warning');
+            return;
+          }
+          syncWsColorFieldUi(field, next);
+          const id = field.dataset.entityId;
+          try {
+            if (field.dataset.colorKind === 'project') await wsColorHandlers?.onProjectColor?.(id, next);
+            else if (field.dataset.colorKind === 'tag') await wsColorHandlers?.onTagColor?.(id, next);
+          } catch (err) {
+            ctx.toast?.(err.message, null, 8000, 'error');
+          }
+          closeAllWsColorPops();
+        }
+        if (ev.key === 'Escape') {
+          ev.preventDefault();
+          closeAllWsColorPops();
+        }
+      };
+    });
+  }
+
+  function bindSubmitOnEnter(input, submit) {
+    if (!input || typeof submit !== 'function') return;
+    input.addEventListener('keydown', e => {
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      submit();
+    });
   }
 
   function tr(k, v) {
@@ -43,18 +506,18 @@ const KuiperWorkspaceAdmin = (() => {
     }
   }
 
-  function archivedToggleHtml() {
+  function archivedToggleHtml(checkboxId, checked) {
     return `<label class="kuiper-ws-check kuiper-ws-archived-toggle">
-      <input type="checkbox" id="kuiperWsShowArchived" ${showArchivedEntities ? 'checked' : ''}>
+      <input type="checkbox" id="${esc(checkboxId)}" ${checked ? 'checked' : ''}>
       <span>${esc(tr('workspaceAdminShowArchived'))}</span>
     </label>`;
   }
 
-  function wireArchivedToggle(body) {
-    const cb = body.querySelector('#kuiperWsShowArchived');
+  function wireArchivedToggle(body, checkboxId, onChange) {
+    const cb = body.querySelector(`#${checkboxId}`);
     if (!cb) return;
     cb.onchange = () => {
-      showArchivedEntities = cb.checked;
+      onChange(cb.checked);
       void renderBody();
     };
   }
@@ -101,6 +564,13 @@ const KuiperWorkspaceAdmin = (() => {
     if (impact.board_links > 0) parts.push(tr('workspaceAdminDeleteProjectBoardLinks', { count: impact.board_links }));
     if (impact.sprint_links > 0) parts.push(tr('workspaceAdminDeleteProjectSprintLinks', { count: impact.sprint_links }));
     if (impact.github_repos > 0) parts.push(tr('workspaceAdminDeleteProjectRepos', { count: impact.github_repos }));
+    parts.push(tr('workspaceAdminDeleteProjectWarn'));
+    return parts.join('\n');
+  }
+
+  function formatTagDeletionMessage(impact) {
+    const parts = [tr('workspaceAdminDeleteTagIntro', { name: impact.tag_name })];
+    if (impact.cards > 0) parts.push(tr('workspaceAdminDeleteTagCards', { count: impact.cards }));
     parts.push(tr('workspaceAdminDeleteProjectWarn'));
     return parts.join('\n');
   }
@@ -232,20 +702,23 @@ const KuiperWorkspaceAdmin = (() => {
   }
 
   function setTab(next) {
-    tab = next;
+    tab = normalizeTab(next);
+    persistAdminTab(tab);
     renderBody();
   }
 
   function prepare(nextTab) {
-    const next = normalizeTab(nextTab || tab);
+    const next = nextTab != null && nextTab !== ''
+      ? normalizeTab(nextTab)
+      : (readPersistedAdminTab() || normalizeTab(tab));
     pendingTab = next;
     tab = next;
-    managedOrgSlug = orgSlug();
-    if (!selectedBoardSlug) selectedBoardSlug = boardSlug();
-    const st = ctx.state?.()._kuiper;
-    if (!selectedBoardId && selectedBoardSlug === boardSlug() && st?.boardId) {
-      selectedBoardId = st.boardId;
-    }
+    persistAdminTab(next);
+    syncManagedContext();
+  }
+
+  function syncAfterBoardLoad() {
+    syncManagedContext();
   }
 
   function tabButtons() {
@@ -253,9 +726,8 @@ const KuiperWorkspaceAdmin = (() => {
     if (!nav) return;
     const tabs = [
       ['organizations', 'workspaceAdminTabOrganizations'],
-      ['boards', 'workspaceAdminTabBoards'],
       ['projects', 'projects'],
-      ['tags', 'tags'],
+      ['boards', 'workspaceAdminTabBoards'],
       ['sprints', 'sprints'],
     ];
     nav.innerHTML = tabs.map(([id, key]) =>
@@ -568,14 +1040,14 @@ const KuiperWorkspaceAdmin = (() => {
       <section class="kuiper-ws-section kuiper-ws-section--compact">
         <div class="kuiper-ws-row kuiper-ws-section-head">
           <div class="menu-label">${esc(tr('workspaceAdminBoardList'))}</div>
-          ${archivedToggleHtml()}
+          ${archivedToggleHtml('kuiperWsShowArchived', showArchivedEntities)}
         </div>
         <ul class="kuiper-ws-list kuiper-ws-board-list" id="kuiperWsBoardList">
           ${boards.map(b => boardRowHtml(b, current, selectedBoardSlug)).join('')}
         </ul>
       </section>
       <div id="kuiperWsBoardDetail"></div>`;
-    wireArchivedToggle(body);
+    wireArchivedToggle(body, 'kuiperWsShowArchived', checked => { showArchivedEntities = checked; });
     wireBoardListHandlers(body);
     const nameInput = body.querySelector('#kuiperWsNewBoardName');
     body.querySelector('[data-act="add-board"]').onclick = () => submitNewBoard(body);
@@ -744,11 +1216,11 @@ const KuiperWorkspaceAdmin = (() => {
       <section class="kuiper-ws-section kuiper-ws-section--compact">
         <div class="kuiper-ws-row kuiper-ws-section-head">
           <div class="menu-label">${esc(tr('workspaceAdminOrgList'))}</div>
-          ${archivedToggleHtml()}
+          ${archivedToggleHtml('kuiperWsShowArchived', showArchivedEntities)}
         </div>
         <ul class="kuiper-ws-list" id="kuiperWsOrgList"></ul>
       </section>`;
-    wireArchivedToggle(body);
+    wireArchivedToggle(body, 'kuiperWsShowArchived', checked => { showArchivedEntities = checked; });
     const ul = body.querySelector('#kuiperWsOrgList');
     for (const o of orgs) {
       const isActive = o.slug === active;
@@ -880,55 +1352,71 @@ const KuiperWorkspaceAdmin = (() => {
 
   async function renderProjectsTab(body) {
     syncOrgInUrl();
-    const projects = await KuiperStore.listOrgProjects(orgSlug(), { includeArchived: showArchivedEntities });
+    const slug = orgSlug();
+    body.classList.add('kuiper-ws-boards-tab');
+    const projects = await KuiperStore.listOrgProjects(slug, { includeArchived: showArchivedProjects });
+    const tags = slug
+      ? await KuiperStore.listOrgTags(slug, { includeArchived: showArchivedTags }).catch(() => [])
+      : [];
     body.innerHTML = `
-      <section class="kuiper-ws-section">
-        <p class="kuiper-hint">${esc(tr('workspaceAdminOneOrgPerProject'))}</p>
+      <section class="kuiper-ws-section kuiper-ws-section--compact">
+        <div class="menu-label">${esc(tr('workspaceAdminNewProject'))}</div>
         <div class="kuiper-ws-row">
-          <input type="text" class="kuiper-ws-input" id="kuiperWsNewProj" placeholder="${esc(tr('workspaceAdminNewProject'))}">
+          <input type="text" class="kuiper-ws-input" id="kuiperWsNewProj" placeholder="${esc(tr('workspaceAdminNewProject'))}" autocomplete="off">
           <button type="button" class="pill sm" data-act="add-project">${esc(tr('create'))}</button>
         </div>
+        <p class="kuiper-hint">${esc(tr('workspaceAdminOneOrgPerProject'))}</p>
+      </section>
+      <section class="kuiper-ws-section kuiper-ws-section--compact">
         <div class="kuiper-ws-row kuiper-ws-section-head">
           <div class="menu-label">${esc(tr('projects'))}</div>
-          ${archivedToggleHtml()}
+          ${archivedToggleHtml('kuiperWsShowArchivedProjects', showArchivedProjects)}
         </div>
-        <ul class="kuiper-ws-list" id="kuiperWsProjects"></ul>
+        <ul class="kuiper-ws-list kuiper-ws-board-list" id="kuiperWsProjects"></ul>
+      </section>
+      <section class="kuiper-ws-section kuiper-ws-section--compact kuiper-ws-tags-block">
+        <div class="kuiper-ws-row kuiper-ws-section-head">
+          <div class="menu-label">${esc(tr('tags'))}</div>
+          ${archivedToggleHtml('kuiperWsShowArchivedTags', showArchivedTags)}
+        </div>
+        <p class="kuiper-hint">${esc(tr('workspaceAdminTagsOrgHint'))}</p>
+        <div class="kuiper-ws-row">
+          <input type="text" class="kuiper-ws-input" id="kuiperWsNewTag" placeholder="${esc(tr('workspaceAdminNewTag'))}" autocomplete="off" spellcheck="false">
+          <button type="button" class="pill sm" data-act="add-tag">${esc(tr('create'))}</button>
+        </div>
+        <ul class="kuiper-ws-list kuiper-ws-board-list" id="kuiperWsTags"></ul>
       </section>`;
-    wireArchivedToggle(body);
+    wireArchivedToggle(body, 'kuiperWsShowArchivedProjects', checked => { showArchivedProjects = checked; });
+    wireArchivedToggle(body, 'kuiperWsShowArchivedTags', checked => { showArchivedTags = checked; });
+    wireCatalogRowActionFocus(body);
     const ul = body.querySelector('#kuiperWsProjects');
-    for (const p of projects) {
-      const isArchived = archivedFlag(p);
-      const li = document.createElement('li');
-      li.className = `kuiper-ws-list-row kuiper-ws-entity-row kuiper-ws-project-row${isArchived ? ' is-archived-entity' : ''}`;
-      const archBadge = isArchived
-        ? `<span class="kuiper-ws-archived-badge">${esc(tr('workspaceAdminArchivedBadge'))}</span>`
-        : '';
-      const actions = entityActionButtons({
-        archived: isArchived,
-        archiveAct: 'archive-project',
-        restoreAct: 'restore-project',
-        deleteAct: 'delete-project',
-        slugAttr: 'project-id',
-        slug: p.id,
-      });
-      li.innerHTML = `<input type="text" class="kuiper-ws-input kuiper-ws-entity-name" value="${esc(p.name)}" data-pid="${esc(p.id)}">
-        <div class="kuiper-ws-entity-status">${archBadge}</div>
-        ${actions}`;
-      ul.append(li);
-    }
-    ul.querySelectorAll('input[data-pid]').forEach(inp => {
-      inp.onchange = async () => {
+    ul.innerHTML = projects.map((p, index) => catalogEntityRowHtml({
+      kind: 'project',
+      id: p.id,
+      name: p.name,
+      slug: p.slug,
+      color: wsEntityColor(p.color, wsColorByIndex(index)),
+      colorKind: 'project',
+      isArchived: archivedFlag(p),
+      archiveAct: 'archive-project',
+      restoreAct: 'restore-project',
+      deleteAct: 'delete-project',
+    })).join('');
+    ul.querySelectorAll('input[data-project-id]').forEach(inp => {
+      inp.addEventListener('change', async () => {
         const name = inp.value.trim();
         if (!name) return;
-        await KuiperStore.patchProject(inp.dataset.pid, { name });
+        await KuiperStore.patchProject(inp.dataset.projectId, { name });
         await ctx.loadKuiperBoard?.();
         await refreshNavSidebar();
         renderBody();
-      };
+      });
     });
     ul.querySelectorAll('[data-act="archive-project"]').forEach(btn => {
-      btn.onclick = async () => {
-        const id = btn.dataset.projectId;
+      btn.onclick = async e => {
+        e.preventDefault();
+        e.stopPropagation();
+        const id = entityIdFromRow(btn, 'project');
         const p = projects.find(x => x.id === id);
         const name = p?.name || id;
         if (!await confirmArchiveEntity(name)) return;
@@ -943,8 +1431,10 @@ const KuiperWorkspaceAdmin = (() => {
       };
     });
     ul.querySelectorAll('[data-act="restore-project"]').forEach(btn => {
-      btn.onclick = async () => {
-        const id = btn.dataset.projectId;
+      btn.onclick = async e => {
+        e.preventDefault();
+        e.stopPropagation();
+        const id = entityIdFromRow(btn, 'project');
         try {
           await KuiperStore.patchProject(id, { archived: false });
           ctx.toast?.(tr('restore'));
@@ -956,8 +1446,10 @@ const KuiperWorkspaceAdmin = (() => {
       };
     });
     ul.querySelectorAll('[data-act="delete-project"]').forEach(btn => {
-      btn.onclick = async () => {
-        const id = btn.dataset.projectId;
+      btn.onclick = async e => {
+        e.preventDefault();
+        e.stopPropagation();
+        const id = entityIdFromRow(btn, 'project');
         const p = projects.find(x => x.id === id);
         const name = p?.name || id;
         try {
@@ -973,62 +1465,124 @@ const KuiperWorkspaceAdmin = (() => {
         }
       };
     });
-    body.querySelector('[data-act="add-project"]').onclick = async () => {
-      const name = body.querySelector('#kuiperWsNewProj').value.trim();
+    const submitNewProject = async () => {
+      const name = body.querySelector('#kuiperWsNewProj')?.value.trim();
       if (!name) return;
       await KuiperStore.createOrgProject(orgSlug(), { name });
+      body.querySelector('#kuiperWsNewProj').value = '';
       await reloadBoard();
       renderBody();
     };
-  }
+    body.querySelector('[data-act="add-project"]').onclick = () => { void submitNewProject(); };
+    bindSubmitOnEnter(body.querySelector('#kuiperWsNewProj'), submitNewProject);
 
-  async function renderTagsTab(body) {
-    const slug = orgSlug();
-    if (!slug) {
-      body.innerHTML = `<p class="faint">${esc(tr('workspaceAdminNeedsOrg'))}</p>`;
-      return;
-    }
-    const tags = await KuiperStore.listOrgTags(slug);
-    body.innerHTML = `
-      <section class="kuiper-ws-section">
-        <p class="faint kuiper-ws-hint">${esc(tr('workspaceAdminTagsOrgHint'))}</p>
-        <div class="kuiper-ws-row">
-          <input type="text" class="kuiper-ws-input" id="kuiperWsNewTag" placeholder="${esc(tr('workspaceAdminNewTag'))}">
-          <button type="button" class="pill sm" data-act="add-tag">${esc(tr('create'))}</button>
-        </div>
-        <ul class="kuiper-ws-list" id="kuiperWsTags"></ul>
-      </section>`;
-    const ul = body.querySelector('#kuiperWsTags');
-    for (const tag of tags) {
-      const li = document.createElement('li');
-      li.className = 'kuiper-ws-list-row';
-      li.innerHTML = `<input type="text" class="kuiper-ws-input" value="${esc(tag.name)}" data-tag-id="${esc(tag.id)}">
-        <button type="button" class="icon sm danger" data-del-tag="${esc(tag.id)}">×</button>`;
-      ul.append(li);
-    }
-    ul.querySelectorAll('input').forEach(inp => {
-      inp.onchange = async () => {
-        const newName = inp.value.trim();
-        if (!newName) return;
-        await KuiperStore.renameTag(inp.dataset.tagId, newName);
-        await reloadBoard();
-        renderBody();
+    const tagUl = body.querySelector('#kuiperWsTags');
+    tagUl.innerHTML = tags.map((tag, index) => catalogEntityRowHtml({
+      kind: 'tag',
+      id: tag.id,
+      name: tag.name,
+      slug: '',
+      color: wsEntityColor(tag.color, wsColorByName(tag.name) || wsColorByIndex(index + 2)),
+      colorKind: 'tag',
+      isArchived: archivedFlag(tag),
+      archiveAct: 'archive-tag',
+      restoreAct: 'restore-tag',
+      deleteAct: 'delete-tag',
+    })).join('');
+    bindTagNameInputs(body, { onRenamed: async () => { await reloadBoard(); await renderBody(); } });
+    bindNewTagInput(body.querySelector('#kuiperWsNewTag'));
+    tagUl.querySelectorAll('[data-act="archive-tag"]').forEach(btn => {
+      btn.onclick = async e => {
+        e.preventDefault();
+        e.stopPropagation();
+        const id = entityIdFromRow(btn, 'tag');
+        if (!id) return;
+        const tag = tags.find(x => x.id === id);
+        const name = tag?.name || btn.closest('.kuiper-ws-catalog-row')?.dataset.entityName || id;
+        if (!await confirmArchiveEntity(name)) return;
+        try {
+          await KuiperStore.patchTag(id, { archived: true });
+          ctx.toast?.(tr('workspaceAdminArchivedToast'));
+          await reloadBoard();
+          await renderBody();
+        } catch (err) {
+          ctx.toast?.(err.message, null, 8000, 'error');
+        }
       };
     });
-    ul.querySelectorAll('[data-del-tag]').forEach(btn => {
-      btn.onclick = async () => {
-        await KuiperStore.deleteTag(btn.dataset.delTag);
-        await reloadBoard();
-        renderBody();
+    tagUl.querySelectorAll('[data-act="restore-tag"]').forEach(btn => {
+      btn.onclick = async e => {
+        e.preventDefault();
+        e.stopPropagation();
+        const id = entityIdFromRow(btn, 'tag');
+        if (!id) return;
+        try {
+          await KuiperStore.patchTag(id, { archived: false });
+          ctx.toast?.(tr('restore'));
+          await reloadBoard();
+          await renderBody();
+        } catch (err) {
+          ctx.toast?.(err.message, null, 8000, 'error');
+        }
       };
     });
-    body.querySelector('[data-act="add-tag"]').onclick = async () => {
-      const name = body.querySelector('#kuiperWsNewTag').value.trim();
-      if (!name) return;
-      await KuiperStore.createOrgTag(slug, name);
-      await reloadBoard();
-      renderBody();
+    tagUl.querySelectorAll('[data-act="delete-tag"]').forEach(btn => {
+      btn.onclick = async e => {
+        e.preventDefault();
+        e.stopPropagation();
+        const id = entityIdFromRow(btn, 'tag');
+        const tag = tags.find(x => x.id === id);
+        const name = tag?.name || id;
+        try {
+          const impact = await KuiperStore.tagDeletionImpact(id);
+          const message = formatTagDeletionMessage(impact);
+          if (!await confirmDeleteEntity(name, { message })) return;
+          await KuiperStore.deleteTag(id);
+          ctx.toast?.(tr('workspaceAdminDeletedToast'));
+          await reloadBoard();
+          await renderBody();
+        } catch (err) {
+          ctx.toast?.(err.message, null, 8000, 'error');
+        }
+      };
+    });
+    const submitNewTag = async () => {
+      const raw = body.querySelector('#kuiperWsNewTag')?.value;
+      const name = normalizeTagInput(raw);
+      if (!name) {
+        ctx.toast?.(tr('workspaceAdminTagNameRequired'), null, 4000, 'warning');
+        return;
+      }
+      try {
+        await KuiperStore.createOrgTag(slug, name);
+        body.querySelector('#kuiperWsNewTag').value = '';
+        await reloadBoard();
+        renderBody();
+      } catch (err) {
+        ctx.toast?.(err.message, null, 8000, 'error');
+      }
     };
+    body.querySelector('[data-act="add-tag"]').onclick = () => { void submitNewTag(); };
+    bindSubmitOnEnter(body.querySelector('#kuiperWsNewTag'), submitNewTag);
+
+    wireWsColorPickers(body, {
+      async onProjectColor(id, color) {
+        try {
+          await KuiperStore.patchProject(id, { color });
+          await reloadBoard();
+        } catch (err) {
+          ctx.toast?.(err.message, null, 8000, 'error');
+        }
+      },
+      async onTagColor(id, color) {
+        try {
+          await KuiperStore.patchTag(id, { color });
+          await reloadBoard();
+        } catch (err) {
+          ctx.toast?.(err.message, null, 8000, 'error');
+        }
+      },
+    });
   }
 
   async function renderSprintsTab(body) {
@@ -1095,7 +1649,6 @@ const KuiperWorkspaceAdmin = (() => {
       if (tab === 'organizations') await renderOrganizationsTab(body);
       else if (tab === 'boards') await renderBoardsTab(body);
       else if (tab === 'projects') await renderProjectsTab(body);
-      else if (tab === 'tags') await renderTagsTab(body);
       else if (tab === 'sprints') await renderSprintsTab(body);
     } catch (err) {
       body.innerHTML = `<p class="kuiper-cal-empty">${esc(err.message)}</p>`;
@@ -1112,6 +1665,9 @@ const KuiperWorkspaceAdmin = (() => {
     if (pendingTab) {
       tab = pendingTab;
       pendingTab = null;
+    } else {
+      const saved = readPersistedAdminTab();
+      if (saved) tab = saved;
     }
     boardEl.className = 'board kuiper-ws-board';
     ensureShell();
@@ -1148,7 +1704,18 @@ const KuiperWorkspaceAdmin = (() => {
     if (tab === 'boards') await refreshBoardsPanels();
   }
 
-  return { init, open, close, render, prepare, setTab, onBoardStagesChanged, onActiveOrgChanged };
+  return {
+    init,
+    open,
+    close,
+    render,
+    prepare,
+    setTab,
+    reloadBoard,
+    syncAfterBoardLoad,
+    onBoardStagesChanged,
+    onActiveOrgChanged,
+  };
 })();
 
 if (typeof window !== 'undefined') window.KuiperWorkspaceAdmin = KuiperWorkspaceAdmin;

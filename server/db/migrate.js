@@ -5,6 +5,7 @@ const path = require('path');
 const { migrationsDir } = require('../config.js');
 const { nowIso } = require('../util.js');
 const { backfill003 } = require('./backfill-003.js');
+const { backfillEntityColors } = require('./backfill-011.js');
 
 function listMigrationFiles() {
   const dir = migrationsDir();
@@ -40,6 +41,7 @@ function migrate(db) {
     applied += 1;
   }
   backfill003(db);
+  backfillEntityColors(db);
   return { version: currentVersion(db), applied };
 }
 

@@ -181,6 +181,14 @@ async function kuiperSyncToServer() {
 }
 
 function refreshKuiperBoard() {
+  const inWorkspace = typeof KuiperUI !== 'undefined' && KuiperUI.isWorkspaceView?.();
+  if (inWorkspace && typeof KuiperWorkspaceAdmin !== 'undefined' && KuiperWorkspaceAdmin.reloadBoard) {
+    return KuiperWorkspaceAdmin.reloadBoard().catch(err => {
+      console.warn('kuiper refresh failed —', err);
+      toast(locale === 'es' ? 'No se pudo refrescar el tablero' : 'Could not refresh board', null, 5000, 'error');
+      throw err;
+    });
+  }
   return loadKuiperBoard()
     .then(() => render())
     .catch(err => {

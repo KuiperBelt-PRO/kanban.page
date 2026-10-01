@@ -132,6 +132,8 @@ const KuiperUI = (() => {
   }
 
   function tagColor(name) {
+    const map = ctx.state?.()?._kuiper?.tagColors;
+    if (map && map[name]) return map[name];
     const s = String(name || '');
     let h = 0;
     for (let i = 0; i < s.length; i++) h = ((h << 5) - h) + s.charCodeAt(i);
@@ -822,9 +824,9 @@ const KuiperUI = (() => {
     renderViewTabs();
     syncWorkspaceManageBtn();
     if (typeof KuiperWorkspaceAdmin !== 'undefined') {
-      KuiperWorkspaceAdmin.prepare?.(nextTab || 'organizations');
+      KuiperWorkspaceAdmin.prepare?.(nextTab);
     }
-    saveUiPrefs({ boardViewBeforeWorkspace });
+    saveUiPrefs({ boardView: 'workspace', boardViewBeforeWorkspace });
     ctx.renderBoard?.();
   }
 
@@ -1801,7 +1803,7 @@ const KuiperUI = (() => {
     renderSidebar();
     mountRailControls(document.getElementById('filters'));
     if (isWorkspaceView() && typeof KuiperWorkspaceAdmin !== 'undefined') {
-      KuiperWorkspaceAdmin.prepare?.();
+      KuiperWorkspaceAdmin.syncAfterBoardLoad?.();
     }
     syncWorkspaceManageBtn();
   }

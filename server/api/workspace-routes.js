@@ -48,7 +48,12 @@ async function handleWorkspaceRoutes(req, res, db, urlPath, method, { badRequest
   if (orgTags && method === 'GET') {
     const org = orgs.getBySlug(db, decodeURIComponent(orgTags[1]));
     if (!org) return notFound(res);
-    return sendJson(res, 200, { ok: true, data: { tags: tags.listByOrganization(db, org.id) } });
+    const q = new URL(req.url || '', 'http://localhost').searchParams;
+    const includeArchived = q.get('include_archived') === '1';
+    return sendJson(res, 200, {
+      ok: true,
+      data: { tags: tags.listByOrganization(db, org.id, { includeArchived }) },
+    });
   }
   if (orgTags && method === 'POST') {
     try {
@@ -334,13 +339,24 @@ async function handleWorkspaceRoutes(req, res, db, urlPath, method, { badRequest
     }
   }
 
+  const tagImpact = urlPath.match(/^\/api\/v1\/tags\/([^/]+)\/deletion-impact$/);
+  if (tagImpact && method === 'GET') {
+    try {
+      const impact = tags.deletionImpact(db, decodeURIComponent(tagImpact[1]));
+      return sendJson(res, 200, { ok: true, data: { impact } });
+    } catch (err) {
+      return badRequest(res, err.message);
+    }
+  }
+
   const tagId = urlPath.match(/^\/api\/v1\/tags\/([^/]+)$/);
   if (tagId && method === 'PATCH') {
     try {
       const body = await readBody(req);
-      const tag = tags.rename(db, decodeURIComponent(tagId[1]), body.name);
-      const card = db.prepare('SELECT board_id FROM cards JOIN card_tags ON card_tags.card_id = cards.id WHERE card_tags.tag_id = ? LIMIT 1').get(tag.id);
-      if (card?.board_id) boards.bumpVersion(db, card.board_id);
+      const tag = tags.update(db, decodeURIComponent(tagId[1]), body);
+      for (const row of tags.boardIdsUsingTag(db, tag.id)) {
+        boards.bumpVersion(db, row);
+      }
       return sendJson(res, 200, { ok: true, data: { tag } });
     } catch (err) {
       return badRequest(res, err.message);

@@ -11,6 +11,7 @@ const orgs = require('../server/db/repositories/organizations.js');
 const projects = require('../server/db/repositories/projects.js');
 const boards = require('../server/db/repositories/boards.js');
 const cards = require('../server/db/repositories/cards.js');
+const tags = require('../server/db/repositories/tags.js');
 const { isCardId } = require('../server/ids.js');
 
 let tmpDir;
@@ -33,7 +34,7 @@ describe('db migrate', () => {
     const db = openDb();
     const first = migrate(db);
     const second = migrate(db);
-    assert.equal(first.version, 10);
+    assert.equal(first.version, 12);
     assert.equal(second.applied, 0);
   });
 
@@ -73,5 +74,28 @@ describe('db migrate', () => {
     });
     assert.equal(story.issue_type, 'story');
     assert.equal(story.epic_id, epicCard.id);
+  });
+
+  it('assigns and updates entity colors', () => {
+    const db = openDb();
+    migrate(db);
+    const org = orgs.create(db, { slug: 'acme', name: 'Acme' });
+    const p1 = projects.create(db, { organization_id: org.id, slug: 'p1', name: 'P1', code: 'P1' });
+    const p2 = projects.create(db, { organization_id: org.id, slug: 'p2', name: 'P2', code: 'P2' });
+    assert.ok(/^#[0-9A-F]{6}$/.test(p1.color));
+    assert.notEqual(p1.color, p2.color);
+    const t1 = tags.createForOrganization(db, org.id, 'backend');
+    assert.ok(/^#[0-9A-F]{6}$/.test(t1.color));
+    const t2 = tags.update(db, t1.id, { color: '#112233' });
+    assert.equal(t2.color, '#112233');
+    const archived = tags.update(db, t1.id, { archived: true });
+    assert.equal(archived.archived, 1);
+    const active = tags.listByOrganization(db, org.id);
+    assert.equal(active.length, 0);
+    const all = tags.listByOrganization(db, org.id, { includeArchived: true });
+    assert.equal(all.length, 1);
+    assert.equal(tags.normalizeTagName('Back End'), 'BACKEND');
+    assert.equal(tags.normalizeTagName('api_v2'), 'API_V2');
+    assert.equal(tags.normalizeTagName(''), '');
   });
 });

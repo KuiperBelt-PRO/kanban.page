@@ -1,6 +1,7 @@
 'use strict';
 
 const orgs = require('./db/repositories/organizations.js');
+const { colorByName } = require('./entity-colors.js');
 
 /** Map Kuiper board snapshot → upstream kanban.page state shape. */
 
@@ -96,6 +97,11 @@ function snapshotToState(snapshot) {
     });
   }
   const org = snapshot.organization || null;
+  const boardTagsRaw = snapshot.board_tags || [];
+  const tagColors = {};
+  for (const t of boardTagsRaw) {
+    tagColors[t.name] = t.color || colorByName(t.name);
+  }
   return {
     columns,
     columnsMt: now,
@@ -121,7 +127,11 @@ function snapshotToState(snapshot) {
       boardSlug: snapshot.board.slug,
       boardName: snapshot.board.name,
       version: snapshot.version,
-      boardTags: (snapshot.board_tags || []).map(t => t.name),
+      boardTags: boardTagsRaw.map(t => ({
+        name: t.name,
+        color: t.color || colorByName(t.name),
+      })),
+      tagColors,
       organization: org ? { id: org.id, slug: org.slug, name: org.name } : null,
     },
   };

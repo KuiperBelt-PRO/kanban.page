@@ -1939,7 +1939,9 @@ button[disabled] { opacity: .4; pointer-events: none; }
   color: var(--muted);
 }
 .kuiper-ws-tabs {
-  flex: 2 1 16rem;
+  flex: 0 0 auto;
+  margin-left: auto;
+  width: max-content;
   max-width: 100%;
 }
 .kuiper-ws-body {

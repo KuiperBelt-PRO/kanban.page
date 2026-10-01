@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "kuiper-kanban": {
+      "command": "${workspaceFolder}/mcp/.venv/Scripts/python.exe",
+      "args": ["-m", "kuiper_kanban_mcp"],
+      "cwd": "${workspaceFolder}/mcp",
+      "env": {
+        "KANBAN_REPO_ROOT": "${workspaceFolder}",
+        "KANBAN_NODE": "C:\\Program Files\\nodejs\\node.exe"
+      }
+    }
+  }
+}

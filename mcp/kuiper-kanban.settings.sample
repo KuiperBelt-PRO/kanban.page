@@ -1,0 +1,16 @@
+{
+  "node_path": "C:/Program Files/nodejs/node.exe",
+  "cli_path": "${repo_root}/cli/kanban.js",
+  "cli_timeout_seconds": 30,
+  "database_path": "${repo_root}/.local/kuiper-kanban/kuiper.db",
+  "default_organization": "KuiperBelt-PRO",
+  "default_board": "hub-delivery",
+  "serve_host": "127.0.0.1",
+  "serve_port": 8765,
+  "auto_start_serve": true,
+  "migrate_on_start": true,
+  "serve_startup_seconds": 15,
+  "default_ui_theme": "dark",
+  "open_board_on_mcp_start": true,
+  "open_board_target": "cursor"
+}

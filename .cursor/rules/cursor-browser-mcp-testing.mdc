@@ -1,10 +1,10 @@
 ---
-description: Pruebas UI kanban.page vía kanban serve + MCP browser (wrapper del hub)
+description: Pruebas UI kanban.page vía kanban serve + MCP browser
 alwaysApply: true
 ---
 
 # Pruebas browser (kanban.page)
 
-**Hub:** `Vibe-Coding/.cursor/rules/cursor-browser-mcp-testing-ide.mdc`.
+**Regla canónica:** `Vibe-Coding/.cursor/rules/cursor-browser-mcp-testing-ide.mdc`.
 
-**URL:** no inventarla — `kanban_board_url` / `kanban_open_board` (skill `Vibe-Coding/.cursor/skills/kuiper-kanban/SKILL.md`). Tras cambios en `server/api/router.js`: `kanban_serve_restart`.
+**URL:** no inventarla — tools MCP `kanban_board_url` / `kanban_open_board` (skill `.cursor/skills/kuiper-kanban/SKILL.md`). Tras cambios en `server/api/router.js`: `kanban_serve_restart`.

@@ -2120,7 +2120,7 @@ button[disabled] { opacity: .4; pointer-events: none; }
   min-width: 0;
   margin-bottom: 0 !important;
 }
-.kuiper-ws-board-col-stages {
+.kuiper-ws-boards-tab .kuiper-ws-board-columns .kuiper-ws-projects-compact {
   border-left: 1px solid var(--line);
   padding-left: 12px;
 }
@@ -2139,6 +2139,13 @@ button[disabled] { opacity: .4; pointer-events: none; }
 @media (max-width: 560px) {
   .kuiper-ws-board-columns {
     grid-template-columns: 1fr;
+  }
+  .kuiper-ws-boards-tab .kuiper-ws-board-columns .kuiper-ws-projects-compact {
+    border-left: none;
+    padding-left: 0;
+    border-top: 1px solid var(--line);
+    padding-top: 10px;
+    margin-top: 6px;
   }
   .kuiper-ws-board-col-scroll {
     max-height: none;

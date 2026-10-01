@@ -6,8 +6,9 @@ Punto de entrada para trabajar en este repositorio (Cursor, Claude Code, etc.).
 
 **Solo modo Kuiper:** la UI usa SQLite + API (`kanban serve`, `KANBAN_DB_PATH`). No hay tablero clásico en `localStorage` ni sync E2E en el navegador.
 
-- URL: `http://127.0.0.1:8765/?board=<slug>&org=<org>` (el servidor redirige si falta `board`).
-- Validación en browser: MCP `kanban_board_url` / `kanban_open_board`.
+- URL: `http://127.0.0.1:8765/?kuiper=1&board=<slug>&org=<org>` (el servidor redirige si falta `board`).
+- **MCP agente:** `.cursor/mcp.json` → servidor FastMCP en `mcp/` (ver `mcp/README.md`). Skill `.cursor/skills/kuiper-kanban/SKILL.md`.
+- Validación en browser: tools `kanban_board_url` / `kanban_open_board` + cursor-ide-browser.
 - `tests/dom.test.html` (modo upstream) queda **obsoleto** hasta tener tests DOM contra `kanban serve`.
 
 Vanilla HTML/CSS/JS, sin build. Lógica pura en `core.js`; UI en `app.js` + módulos Kuiper.

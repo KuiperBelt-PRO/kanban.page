@@ -690,15 +690,9 @@ const KuiperWorkspaceAdmin = (() => {
         <header class="kuiper-ws-head">
           <h2 id="kuiperWsAdminTitle"></h2>
           <nav class="seg kuiper-ws-tabs" role="tablist" aria-label="${esc(tr('workspaceManage'))}"></nav>
-          <button type="button" class="ghost sm" data-act="ws-back"></button>
         </header>
         <div class="panel-body kuiper-ws-body kuiper-scroll"></div>
       </div>`;
-    const back = host.querySelector('[data-act="ws-back"]');
-    if (back) {
-      back.textContent = tr('workspaceAdminBack');
-      back.onclick = () => close();
-    }
   }
 
   function setTab(next) {
@@ -1128,10 +1122,6 @@ const KuiperWorkspaceAdmin = (() => {
         <div class="menu-label">${esc(tr('workspaceAdminBoardDetail'))} · <span class="faint">${esc(slug)}</span></div>
       </section>
       <div class="kuiper-ws-board-columns">
-        <section class="kuiper-ws-board-col kuiper-ws-section kuiper-ws-section--compact kuiper-ws-projects-compact">
-          <div class="menu-label">${esc(tr('workspaceAdminBoardProjects'))}</div>
-          <ul class="kuiper-ws-list kuiper-ws-board-col-scroll" id="kuiperWsBoardProjects"></ul>
-        </section>
         <section class="kuiper-ws-board-col kuiper-ws-section kuiper-ws-section--compact kuiper-ws-board-col-stages">
           <div class="menu-label">${esc(tr('stage'))}</div>
           <ul class="kuiper-ws-list kuiper-ws-stages kuiper-ws-board-col-scroll" id="kuiperWsStages"></ul>
@@ -1139,6 +1129,10 @@ const KuiperWorkspaceAdmin = (() => {
             <input type="text" class="kuiper-ws-input" id="kuiperWsNewStage" placeholder="${esc(tr('workspaceAdminNewStage'))}">
             <button type="button" class="pill sm" id="kuiperWsAddStageBtn">+</button>
           </div>
+        </section>
+        <section class="kuiper-ws-board-col kuiper-ws-section kuiper-ws-section--compact kuiper-ws-projects-compact">
+          <div class="menu-label">${esc(tr('workspaceAdminBoardProjects'))}</div>
+          <ul class="kuiper-ws-list kuiper-ws-board-col-scroll" id="kuiperWsBoardProjects"></ul>
         </section>
       </div>`;
     const stagesEl = hostEl.querySelector('#kuiperWsStages');

@@ -1,8 +1,49 @@
-# CodeGraph: índice local por máquina (SQLite en .codegraph/)
+# --- Kuiper runtime local (SQLite, serve, MCP settings) ---
+.local/
+mcp/kuiper-kanban.settings
+
+# --- Python (MCP en mcp/) ---
+mcp/.venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# --- Node ---
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# --- Entorno y secretos ---
+.env
+.env.*
+!.env.example
+
+# --- Temporales y logs ---
+tmp/
+temp/
+*.log
+*.tmp
+
+# --- IDE / SO ---
+.DS_Store
+Thumbs.db
+Desktop.ini
+.idea/
+*.swp
+*~
+
+# --- CodeGraph (índice local por máquina) ---
 .codegraph/
 
-.DS_Store
-node_modules/
+# --- Site: assets OG generados (mantener fuentes en repo si las hay) ---
 site/_og/og-1200.*
 site/_og/og-prev.png
 site/_og/og-raw.png

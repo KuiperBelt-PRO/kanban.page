@@ -1,0 +1,21 @@
+---
+description: Enrutar tareas de kanban.page a la skill correcta.
+alwaysApply: true
+---
+
+# Enrutamiento de skills (kanban.page)
+
+Si la petición encaja en una fila, **lee** el `SKILL.md` indicado y aplícalo antes de improvisar.
+
+| Petición | Skill |
+| --- | --- |
+| Tablero, tarjetas, MCP kanban, URL local, informe semanal | `.cursor/skills/kuiper-kanban/SKILL.md` |
+| UI, HTML, CSS, JS del tablero, workspace admin, pruebas browser | `Vibe-Coding/.cursor/skills/web-frontend-dev/SKILL.md` |
+| API `server/`, SQLite, repos, migraciones | `Vibe-Coding/.cursor/skills/web-backend-dev/SKILL.md` |
+| SDD/TDD en este repo (specs en `docs/specs/`) | Spec en `docs/specs/` + tests en `tests/` (ver `AGENTS.md`) |
+| Commit, push, ramas | `Vibe-Coding/.cursor/skills/git-workflow/SKILL.md` |
+| Revisar PR o parche | `Vibe-Coding/.cursor/skills/code-review/SKILL.md` |
+
+**Pruebas UI:** `Vibe-Coding/.cursor/rules/cursor-browser-mcp-testing-ide.mdc` y la regla local `.cursor/rules/cursor-browser-mcp-testing.mdc`.
+
+**MCP kanban:** definido en `.cursor/mcp.json`; bootstrap en `mcp/README.md`.
